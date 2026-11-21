@@ -34,6 +34,47 @@ The addon **only tracks world PvP**. Deaths in **battlegrounds, arenas, and duel
 | Where | Stranglethorn Vale, Booty Bay outskirts (x, y) |
 | When | server time of death |
 
+## Install
+
+The addon is for the **WoW: Forever** client (interface `16001`). Its folder must end up as `Interface/AddOns/GuildVendetta` inside the `_forever_` game folder:
+
+| OS | AddOns folder |
+|---|---|
+| macOS | `/Applications/World of Warcraft/_forever_/Interface/AddOns` |
+| Windows | `C:\Program Files (x86)\World of Warcraft\_forever_\Interface\AddOns` |
+
+### Option 1: download the ZIP (players)
+
+1. On the [repo page](https://github.com/danielgospodinow/guild-vendetta), click **Code → Download ZIP**.
+2. Unzip it. Inside, open `guild-vendetta-main/addon/` and copy the **`GuildVendetta`** folder into your AddOns folder.
+   - Copy only that folder, not the whole `guild-vendetta-main`. WoW only loads an addon whose folder name matches its `.toc` file (`GuildVendetta/GuildVendetta.toc`).
+3. Restart the game, or `/reload` if it's running.
+
+**To update:** delete the old `GuildVendetta` folder and repeat. Your list is kept, because it's stored in the `WTF` folder, not in the addon folder.
+
+### Option 2: symlink a clone (developers)
+
+This links the AddOns folder to a git clone, so `git pull` (or your own edits) shows up in-game after a `/reload`.
+
+1. Clone the repo, for example `git clone https://github.com/danielgospodinow/guild-vendetta.git`.
+2. From the clone's folder, create the link.
+
+   macOS:
+   ```bash
+   ln -s "$PWD/addon/GuildVendetta" "/Applications/World of Warcraft/_forever_/Interface/AddOns/GuildVendetta"
+   ```
+   Windows, in a Command Prompt run as administrator:
+   ```bat
+   mklink /D "C:\Program Files (x86)\World of Warcraft\_forever_\Interface\AddOns\GuildVendetta" "%CD%\addon\GuildVendetta"
+   ```
+3. Restart the game, or `/reload` if it's running.
+
+**To uninstall:** delete the link only (`rm` on macOS, `rmdir` on Windows). The clone stays untouched.
+
+### If it doesn't show up
+
+At character select, open **AddOns** and make sure *Guild Vendetta* is ticked. If it's listed as out of date, tick **Load out of date AddOns**.
+
 ## The UI
 
 ```
@@ -76,22 +117,6 @@ The addon **only tracks world PvP**. Deaths in **battlegrounds, arenas, and duel
 | `/gv test` | Preview the alert (flash, message, sound) |
 | `/gv sync` | Ask online guildmates for anything you're missing |
 | `/gv status` | Show the guild, entry counts, and whether the last death recap was readable |
-
-## Install
-
-The addon targets the WoW: Forever client (interface `16001`).
-
-1. Clone this repo.
-2. Link the addon into your Forever AddOns folder (macOS paths shown):
-   ```bash
-   ln -s "$PWD/addon/GuildVendetta" "/Applications/World of Warcraft/_forever_/Interface/AddOns/GuildVendetta"
-   ```
-   On Windows, copy `addon/GuildVendetta` into `World of Warcraft\_forever_\Interface\AddOns\` instead.
-3. Restart the game, or run `/reload` if it is already running.
-
-### Probe addon (diagnostics)
-
-`probe/GuildVendettaProbe` is a throwaway diagnostic addon ([#1](https://github.com/danielgospodinow/guild-vendetta/issues/1)). It logs what the game lets addons read: the death recap, name lookups, enemy names and levels, and guild messages. Link it the same way, play a bit of world PvP, then `/reload`. Its log is saved to `WTF/Account/<account>/SavedVariables/GuildVendettaProbe.lua`. `/gvp ping` tests guild messages; guildmates running the probe answer with a pong.
 
 ## How it works
 
@@ -262,6 +287,12 @@ server/                    # (future) Go companion app + service, option B
 ```
 
 ## Development
+
+### Probe addon (diagnostics)
+
+`probe/GuildVendettaProbe` is a throwaway diagnostic addon for developers ([#1](https://github.com/danielgospodinow/guild-vendetta/issues/1)). It logs what the game lets addons read: the death recap, name lookups, enemy names and levels, and guild messages. Install it the same way as the addon (either option, using `probe/GuildVendettaProbe`), play a bit of world PvP, then `/reload`. Its log is saved to `WTF/Account/<account>/SavedVariables/GuildVendettaProbe.lua`. `/gvp ping` tests guild messages; guildmates running the probe answer with a pong.
+
+### Tests
 
 The tests run outside the game with [LuaJIT](https://luajit.org/) (`brew install luajit`):
 
