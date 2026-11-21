@@ -42,7 +42,8 @@ function ns.Alert(row)
   local class = LOCALIZED_CLASS_NAMES_MALE[row.class] or row.class or "?"
   local victim = row.kills[1].vic
   local what = row.count == 1 and ("killed " .. victim) or ("killed " .. row.count .. " guildies, last " .. victim)
-  local text = string.format("VENDETTA: %s (%s, %s) %s", ns.Colored(row.name, row.class), class, ns.Level(row.level), what)
+  local text = string.format("VENDETTA: %s (%s, %s) %s, score %d-%d", ns.Colored(row.name, row.class), class,
+    ns.Level(row.level), what, row.count, row.ours or 0)
   if s.message then RaidNotice_AddMessage(RaidWarningFrame, text, ChatTypeInfo["RAID_WARNING"]) end
   if s.sound then PlaySound(SOUNDKIT.RAID_WARNING, "Master") end
   if s.flash then flashScreen() end

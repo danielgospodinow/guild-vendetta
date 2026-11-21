@@ -1,5 +1,6 @@
 -- Throwaway probe for issue #1. Logs what the client exposes to addons:
--- death recap, hostile unit info, name APIs, guild addon messages.
+-- death recap, hostile unit info, name APIs, guild addon messages, and (round 3) the signals for
+-- "we killed an enemy player": honorable-kill messages and seeing an enemy player dead.
 -- Round 1 showed the combat log is blocked for addons on Forever, so it's no longer touched.
 -- Every value is passed through S() so "secret" values are reported, not used.
 
@@ -114,8 +115,23 @@ local handlers = {
     log("names: UnitName=%s | UnitFullName=%s | GetUnitName=%s | realm=%s | normRealm=%s | guid=%s",
       try(UnitName, "player"), try(UnitFullName, "player"), try(GetUnitName, "player", true),
       try(GetRealmName), try(GetNormalizedRealmName), S(UnitGUID("player")))
+    log("honor strings: %q | %q", S(COMBATLOG_HONORGAIN), S(COMBATLOG_HONORGAIN_NO_RANK))
   end,
   PLAYER_DEAD = deathReport,
+  CHAT_MSG_COMBAT_HONOR_GAIN = function(msg) log("HONOR GAIN: %q", S(msg)) end,
+  PLAYER_PVP_KILLS_CHANGED = function(unit) log("PLAYER_PVP_KILLS_CHANGED %s | kills=%s", S(unit), try(GetPVPLifetimeStats)) end,
+  UNIT_HEALTH = function(unit)
+    if unit ~= "target" and not (type(unit) == "string" and unit:find("^nameplate")) then return end
+    local dead, isPlayer = UnitIsDead(unit), UnitIsPlayer(unit)
+    if secret(dead) or secret(isPlayer) then return log("UNIT_HEALTH %s: dead/isPlayer SECRET", unit) end
+    if not (dead and isPlayer) then return end
+    local guid = UnitGUID(unit)
+    local key = "dead" .. S(guid)
+    if seen[key] and GetTime() - seen[key] < 60 then return end
+    seen[key] = GetTime()
+    log("ENEMY DEAD %s: name=%s guid=%s enemy=%s combat=%s", unit, try(UnitName, unit), S(guid),
+      try(UnitIsEnemy, "player", unit), S(UnitAffectingCombat("player")))
+  end,
   PLAYER_TARGET_CHANGED = function() unitReport("target", "target") end,
   UPDATE_MOUSEOVER_UNIT = function() unitReport("mouseover", "mouseover") end,
   NAME_PLATE_UNIT_ADDED = function(unit) unitReport(unit, "nameplate") end,

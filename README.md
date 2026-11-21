@@ -2,13 +2,17 @@
 
 A **World of Warcraft: Forever** addon that keeps a guild-shared **vendetta list**: every enemy player who has killed you or one of your guildmates in world PvP. When someone on the list comes near you, the addon flashes your screen red, shows a raid-warning style message, and plays a warning sound.
 
-> **Status: v0.1, untested in-game.** The first build is in, but it has not run in the live client yet. Work is tracked in [GitHub Issues](https://github.com/danielgospodinow/guild-vendetta/issues). The full design is in [docs/superpowers/specs/2026-11-21-guild-vendetta-design.md](docs/superpowers/specs/2026-11-21-guild-vendetta-design.md).
+> **Status: v0.2.** Kill tracking is tested in the live client. Vendetta detection and sync between two players haven't been tested in-game yet. Work is tracked in [GitHub Issues](https://github.com/danielgospodinow/guild-vendetta/issues). The full design is in [docs/superpowers/specs/2026-11-21-guild-vendetta-design.md](docs/superpowers/specs/2026-11-21-guild-vendetta-design.md).
 
 ## Features
 
 - **Automatic kill tracking.** When a guildmate dies to enemy players, the kill is recorded the moment it happens.
 - **Every contributor counts.** Every enemy player in the victim's **death recap** (Blizzard's "what killed you" summary) is listed, and the killing blow is marked. The design wanted everyone from the last 60 seconds, but WoW: Forever blocks the combat log for addons, so the recap is the only source (see [Known limitations](#known-limitations)).
-- **Kill rank.** Each enemy shows how many guildmates they have killed, and the list is sorted by that count, so the worst offender is #1.
+- **Score.** Each enemy has a score: **their kills on us vs. our kills on them** (`3-1`). The list is sorted by their kills, so the worst offender is #1.
+- **Vendettas.** When guildies take down a listed enemy, every guildie who helped gets credit. This is a *successful vendetta*.
+- **Guild chat announcements.** Every guildie death (*"Todor Zhivkoff was killed by Yasashii Hinghtclaw in Alterac Mountains. Killer registered."*) and every successful vendetta (*"Thrall Durotan took down Yasashii Hinghtclaw. Successful vendetta! (3-1)"*) is posted in visible guild chat. It can be turned off in settings.
+- **Revengers leaderboard.** A second tab ranks guildies by how many vendettas they've struck.
+- **14-day memory.** Kills older than 14 days drop off the list. An enemy with no kills in the last 14 days disappears. The revengers leaderboard keeps every vendetta forever.
 - **Proximity alerts.** You get a red screen flash, a raid-warning message and a sound when a listed enemy is seen nearby. Each part can be turned off. The same enemy alerts at most once every 5 minutes by default.
 - **Shared across the guild, live.** Every guildmate running the addon sees the same list, and updates arrive within about a second.
 - **Removal with the X button.** Any guild member can remove an enemy, and the removal applies to the whole guild.
@@ -33,22 +37,36 @@ The addon **only tracks world PvP**. Deaths in **battlegrounds, arenas, and duel
 ## The UI
 
 ```
-┌[☠]─ Guild Vendetta ──────────────────────────────────[x]┐
-│      [🔍 Search      ]                       42 enemies │
-├──────────────────────────────────────────────────────────┤
-│  #  Enemy        Kills  Lvl  Last victim  Where     When  │
-│  1  + Gankston     3    60   Thrall       Stranglethorn 2h [x]│
-│        killed Thrall (52) in Stranglethorn Vale, Booty Bay │
-│        (27.1, 77.3), 2h ago, by *Gankston, Stabbz          │
-│  2  + Healbot      1    ??   Jaina        Tarren Mill  1d [x]│
-├──────────────────────────────────────────────────────────┤
-│ Last sync: 1m ago from Thrall                 [Settings] │
-└──────────────────────────────────────────────────────────┘
+┌[☠]─ Guild Vendetta ─────────────────────────────────────────────────[x]┐
+│      [🔍 Search      ]                                       42 enemies │
+├─────────────────────────────────────────────────────────────────────────┤
+│  #  Enemy                 Score  Lvl  Victims                 Where   When │
+│  1  - Yasashii Hinghtclaw  3-1    37  Todor Zhivkoff, Jaina…  Alterac  2h [x]│
+│        taken down by Thrall Durotan, Jaina Proudmoore in Arathi, 1h ago   │
+│        killed Todor Zhivkoff (32) in Alterac Mountains, The Headland      │
+│        (39.9, 92.0), 2h ago, by *Yasashii Hinghtclaw, Muffe Kung          │
+│        killed Jaina Proudmoore (30) in Hillsbrad Foothills, 1d ago, by …  │
+│        killed Todor Zhivkoff (31) in Arathi Highlands, 3d ago, by …       │
+│  2  + Muffe Kung           1-0    32  Todor Zhivkoff          Alterac  2h [x]│
+├─────────────────────────────────────────────────────────────────────────┤
+│ Last sync: 1m ago from Thrall Durotan                        [Settings] │
+└─────────────────────────────────────────────────────────────────────────┘
+ [Vendetta list] [Revengers]
+```
+
+**Revengers tab:**
+
+```
+│  #  Guildie            Vendettas  Last taken down          When │
+│  1  Thrall Durotan         7      Yasashii Hinghtclaw       1h  │
+│  2  Jaina Proudmoore       3      Muffe Kung                2d  │
 ```
 
 - Open it with `/gv` or the minimap button. Escape closes it.
-- Click a row to expand every kill by that enemy, with contributors, the killing blow (`*`) and map coordinates.
-- `[x]` removes that enemy for the whole guild, after a confirmation.
+- **Score** is their kills (red) vs. our vendettas on them (green).
+- **Victims** lists every guildie the enemy has killed.
+- **Click a row** to expand that enemy's full history, newest first: every kill (victim, place, coordinates, contributors, killing blow `*`) and every vendetta (who took them down, where).
+- **`[x]`** removes that enemy for the whole guild, after a confirmation. Their score starts over if they come back.
 
 ### Commands
 
@@ -114,14 +132,21 @@ Messages are limited to 255 bytes and are throttled by the client, so large tran
 
 ### The list is an event log
 
-Like a Kafka topic, the list is an append-only log of events. The difference is that the log is copied onto every guildmate's PC instead of living on a central broker. There are two event types:
+Like a Kafka topic, the list is an append-only log of events. The difference is that the log is copied onto every guildmate's PC instead of living on a central broker. There are three event types:
 
 | Event | Meaning |
 |---|---|
 | `KILL` | One guildmate death: victim, all enemy contributors (killing blow marked), levels, zone, coordinates, time |
-| `REMOVE` | "Hide this enemy's kills up to time T", with who removed them |
+| `REMOVE` | "Hide this enemy's kills (and vendettas) up to time T", with who removed them |
+| `VENDETTA` | "Guildie X helped take down listed enemy Y", with time and zone. One per guildie who helped |
 
-The list you see is **computed** from the log. An enemy shows up if they have at least one `KILL` newer than their latest `REMOVE`. Events never change once written, and merging two copies is just a union, so receiving the same event twice is harmless.
+The list you see is **computed** from the log:
+
+- An enemy shows up if they have at least one `KILL` from the last 14 days that is newer than their latest `REMOVE`.
+- **Their score** counts those kills. **Our score** counts our kills on them since the latest `REMOVE`. Credits from several guildies within 60 seconds count as one kill.
+- **Revengers** counts every `VENDETTA` credit per guildie, all-time.
+
+Kills and removals older than 14 days are deleted. Vendettas are kept forever. Events never change once written, and merging two copies is just a union, so receiving the same event twice is harmless.
 
 ### Live updates: the death hook
 
@@ -140,13 +165,22 @@ sequenceDiagram
     Note over O: Gankston now on everyone's list
 ```
 
+### Vendettas: taking them down
+
+The game won't let addons read the combat log, so the addon can't see who damaged an enemy. It credits a guildie for a kill in two ways:
+
+1. **The honorable-kill message.** When an enemy player dies, the game tells everyone who contributed (*"X dies, honorable kill…"*). Every guildie who gets that message for a listed enemy is credited.
+2. **Fallback:** the guildie had the enemy targeted in combat within the last 60 seconds and then saw them dead.
+
+Each credited guildie's addon appends a `VENDETTA` event and broadcasts it. The first one also announces it in guild chat. A vendetta only counts for an enemy who is on the list at that moment.
+
 ### Removal (the X button)
 
 Clicking `[X]` appends a `REMOVE` event and broadcasts it, the same way as a kill:
 
 - The enemy disappears from **every online guildmate's list immediately**. Offline guildmates pick it up at their next sync.
 - Anyone who killed **alongside** the removed enemy keeps their kills on the list.
-- If the removed enemy **kills a guildmate again**, they come back. A removal only clears kills up to the moment of removal.
+- If the removed enemy **kills a guildmate again**, they come back. A removal only clears kills up to the moment of removal, and **their score starts over** at `1-0`. The revengers leaderboard keeps its counts.
 - `REMOVE` events are kept forever, so an old copy of the list can't bring a removed enemy back.
 
 ### Catching up at login: sync only from online players
@@ -186,7 +220,8 @@ flowchart LR
 
 ## Known limitations
 
-- **No combat log on WoW: Forever.** Forever blocks the combat log for addons, and trying to use it triggers *"blocked from an action only available to the Blizzard UI"*. Kills come from the **death recap** instead. The recap only covers the last few hits before death, so an enemy who hit you earlier in the fight may be missing. Whether the recap holds readable names and character IDs is being checked by the [probe (#1)](https://github.com/danielgospodinow/guild-vendetta/issues/1).
+- **No combat log on WoW: Forever.** Forever blocks the combat log for addons, and trying to use it triggers *"blocked from an action only available to the Blizzard UI"*. Kills come from the **death recap** instead. The recap only covers the last few hits before death, so an enemy who hit you earlier in the fight may be missing.
+- **Vendetta credit is approximate.** Without the combat log, "everyone who damaged them" comes from the honorable-kill message or the targeting fallback (see [Vendettas](#vendettas-taking-them-down)). Which of the two Forever supports still needs checking in-game.
 - **Enemies are matched by character ID**, not by name. Names are shown in full everywhere, because Forever characters have two-part names (for example *Todor Zhivkoff*).
 - **Only the victim's client can record the kill**, because only it has the death recap. Guildmates without the addon won't contribute kills.
 - **Pet kills aren't credited to the owner**, because the recap doesn't say who owns a pet.

@@ -4,6 +4,7 @@
 local ROOT = arg[1] or "addon/GuildVendetta"
 local FILES = { "Core.lua", "Capture.lua", "Sync.lua", "Alerts.lua", "UI.lua" }
 local wire = {} -- addon messages "on the GUILD channel"
+local chat = {} -- visible guild chat lines
 local now = 1000
 
 local function mock()
@@ -60,7 +61,12 @@ local function client(first, second)
   env.C_ChatInfo = {
     RegisterAddonMessagePrefix = function() return true end,
     SendAddonMessage = function(p, msg, ch) wire[#wire + 1] = { p, msg, ch, first .. "-" .. second }; return 0 end,
+    SendChatMessage = function(msg, ch) chat[#chat + 1] = ch .. ": " .. msg end,
   }
+  env.COMBATLOG_HONORGAIN = "%s dies, honorable kill Rank: %s (Estimated Honor Points: %d)"
+  env.UnitIsDead = function() return false end
+  env.UnitAffectingCombat = function() return false end
+  env.UnitExists = function() return false end
   env.CreateFrame = function(_, fname)
     local fr = mock()
     local ev = {}
@@ -73,7 +79,8 @@ local function client(first, second)
   end
   for _, k in ipairs({ "UIParent", "Minimap", "RaidWarningFrame", "GameTooltip", "Settings", "ScrollUtil",
     "MinimalSliderWithSteppersMixin", "ScrollBoxConstants", "CreateScrollBoxListLinearView",
-    "CreateDataProvider", "PlaySound", "RaidNotice_AddMessage", "hooksecurefunc", "GameTooltip_Hide" }) do
+    "CreateDataProvider", "PlaySound", "RaidNotice_AddMessage", "hooksecurefunc", "GameTooltip_Hide",
+    "PanelTemplates_SetTab", "PanelTemplates_SetNumTabs", "PanelTemplates_TabResize" }) do
     env[k] = mock()
   end
   env.Minimap.GetWidth = function() return 140 end
@@ -132,8 +139,7 @@ for _, m in ipairs(wire) do if m[4] ~= "Jaina-Proudmoore" then B.fire("CHAT_MSG_
 wire = {}
 B.runTimers()
 assert(#B.ns.view.rows == 2, "B did not get the kill")
-print("B printed:", B.printed[#B.printed])
-assert(B.printed[#B.printed]:find("Thrall Durotan was killed by Stabbz Roe", 1, true), "two-part names not shown")
+assert(B.ns.view.byKey["Player-2-S"].name == "Stabbz Roe", "two-part names not kept")
 
 -- B removes Gankston; A gets it; Stabbz stays
 B.ns.Remove("Player-2-G")
@@ -162,6 +168,36 @@ wire = {}
 A.runTimers()
 assert(A.ns.events[big.id] and #A.ns.events[big.id].en == 20, "chunked kill not reassembled")
 
+-- the victim announced the death in visible guild chat
+assert(chat[1] == "GUILD: [Vendetta] Thrall Durotan was killed by Stabbz Roe, Gankston Doe in Stranglethorn Vale. Killer registered.", chat[1])
+
+-- vendetta via honorable-kill message (first name only) on B; A learns of it and the score becomes 1-1
+B.fire("CHAT_MSG_COMBAT_HONOR_GAIN", "Stabbz dies, honorable kill Rank: Private (Estimated Honor Points: 12)")
+B.runTimers(); B.env.__tick()
+for _, m in ipairs(wire) do A.fire("CHAT_MSG_ADDON", m[1], m[2], m[3], m[4]) end
+wire = {}
+A.runTimers(); B.runTimers(); B.runTimers()
+local st = A.ns.view.byKey["Player-2-S"]
+assert(st.count == 1 and st.ours == 1, "score " .. st.count .. "-" .. st.ours)
+assert(chat[#chat] == "GUILD: [Vendetta] Jaina Proudmoore took down Stabbz Roe. Successful vendetta! (1-1)", chat[#chat])
+
+-- fallback on A: Stabbz targeted in combat, then seen dead -> A is credited for the same kill (still 1-1)
+A.env.UnitExists = function() return true end
+A.env.UnitGUID = function(u) if u == "player" then return "Player-1-Thrall" end return "Player-2-S" end
+A.env.UnitAffectingCombat = function() return true end
+A.env.UnitIsPlayer = function() return true end
+A.env.UnitName = function(u) if u == "player" then return "Thrall", "Durotan" end return "Stabbz", "Roe" end
+A.fire("PLAYER_TARGET_CHANGED")
+A.env.UnitIsDead = function() return true end
+A.fire("UNIT_HEALTH", "target")
+A.runTimers(); A.runTimers()
+st = A.ns.view.byKey["Player-2-S"]
+assert(st.ours == 1 and #st.vendettas[1].by == 2, "fallback credit: ours=" .. st.ours)
+assert(A.ns.view.revengers[1] and #A.ns.view.revengers == 2)
+A.env.UnitIsDead = function() return false end
+A.env.UnitExists = function() return false end
+A.env.__tick()
+
 -- catch-up: a new client C logs in with an empty log and gets everything via H/E
 local C = client("Rexxar", "Misha")
 C.fire("ADDON_LOADED", "GuildVendetta"); C.fire("PLAYER_LOGIN"); C.runTimers()
@@ -182,10 +218,11 @@ pump()
 local cn = 0
 for _ in pairs(C.ns.events) do cn = cn + 1 end
 C.runTimers()
-assert(cn == 3, "C has " .. cn .. " events")
+assert(cn == 5, "C has " .. cn .. " events")
 assert(#C.ns.view.rows == 21)
 
--- alert on seeing a listed enemy via nameplate
+-- alert on seeing a listed enemy via nameplate (after the 5 min cooldown from the targeting above)
+now = now + 301
 A.env.UnitExists = function() return true end
 A.env.UnitIsPlayer = function() return true end
 A.env.UnitName = function(u) if u == "player" then return "Thrall", "Durotan" end return "Stabbz", "Roe" end

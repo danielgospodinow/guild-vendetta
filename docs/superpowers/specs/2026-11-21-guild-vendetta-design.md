@@ -8,6 +8,11 @@ Date: 2026-11-21 · Status: approved
 > - **Enemies are keyed by GUID.** Names have two parts on Forever and the realm comes back empty, so the name is only a fallback key.
 > - **Pet kills** can't be credited to the owner.
 
+> **Update 2026-11-21 (#12):** added a `VENDETTA` event type (one credit per guildie who helped kill a listed enemy, detected from the honorable-kill message with a targeting fallback) and a score per enemy: their kills vs. our vendetta kills, where credits within 60 s are one kill. Both halves of the score start over on REMOVE. Other changes:
+> - **Revengers leaderboard:** counts every credit, all-time.
+> - **Announcements:** deaths and vendettas are posted in visible guild chat (toggleable).
+> - **Expiry:** kills and removals expire after 14 days; vendettas never do.
+
 ## Intent
 
 A World of Warcraft: Forever addon that keeps a **guild-shared vendetta list**: every enemy player who killed you or a guildmate in world PvP. When someone on the list shows up near you, the addon alerts you (screen flash + raid-warning message + sound), so the guild can avoid them, hunt them, or warn each other.
