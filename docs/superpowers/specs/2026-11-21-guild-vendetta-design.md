@@ -2,6 +2,12 @@
 
 Date: 2026-11-21 · Status: approved
 
+> **Update 2026-11-21 (probe round 1, live client 1.60.1):** the combat log is **blocked** for addons on Forever. `CombatLogGetCurrentEventInfo` doesn't exist, and registering `COMBAT_LOG_EVENT_UNFILTERED` triggers "blocked from an action only available to the Blizzard UI". Changes:
+> - **Kill capture** reads `C_DeathRecap` on `PLAYER_DEAD` instead of a 60-second combat-log buffer. Contributors are limited to the enemy players in the recap.
+> - **Proximity** uses nameplates, target and mouseover only.
+> - **Enemies are keyed by GUID.** Names have two parts on Forever and the realm comes back empty, so the name is only a fallback key.
+> - **Pet kills** can't be credited to the owner.
+
 ## Intent
 
 A World of Warcraft: Forever addon that keeps a **guild-shared vendetta list**: every enemy player who killed you or a guildmate in world PvP. When someone on the list shows up near you, the addon alerts you (screen flash + raid-warning message + sound), so the guild can avoid them, hunt them, or warn each other.

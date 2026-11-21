@@ -1,54 +1,29 @@
--- Kill capture: keep the last 60s of hostile-player damage against us; on death, record a KILL.
--- Also feeds hostile players seen in the combat log to the proximity alerts.
+-- Kill capture: on death, read the death recap (WoW: Forever blocks the combat log for addons)
+-- and record a KILL with every enemy player in it.
 local _, ns = ...
 
-local WINDOW = 60
 ns.levels = {} -- guid -> last seen level (filled by Alerts from target/mouseover/nameplates)
-ns.health = { combatLog = "not registered", secret = 0 }
+ns.health = { recap = "no death yet", secret = 0 }
 
--- WoW: Forever can mark combat data as "secret"; secret values can't be compared or stored.
+-- WoW: Forever can mark data as "secret"; secret values can't be compared or stored.
 function ns.Secret(v) return issecretvalue ~= nil and issecretvalue(v) end
 
-local DAMAGE = {
-  SWING_DAMAGE = true, RANGE_DAMAGE = true, SPELL_DAMAGE = true, SPELL_PERIODIC_DAMAGE = true,
-  DAMAGE_SHIELD = true, DAMAGE_SPLIT = true, SPELL_INSTAKILL = true,
-}
-local HOSTILE, PLAYER = COMBATLOG_OBJECT_REACTION_HOSTILE, COMBATLOG_OBJECT_TYPE_PLAYER
-local CONTROL = COMBATLOG_OBJECT_CONTROL_PLAYER
-local PETLIKE = bit.bor(COMBATLOG_OBJECT_TYPE_PET, COMBATLOG_OBJECT_TYPE_GUARDIAN)
+local HOSTILE = COMBATLOG_OBJECT_REACTION_HOSTILE or 0x40
+local duelEnd         -- { epoch, session }: recap hits from before a duel ended must not count
+local lastRecapStamp  -- newest timestamp of the recap we already used, to skip stale recaps
 
-local buffer = {} -- { t, guid, name }, oldest first
-local owners = {} -- pet/guardian guid -> { guid, name } from SPELL_SUMMON
-local dueling = false
-
-local function hostilePlayer(flags)
-  return bit.band(flags, HOSTILE) > 0 and bit.band(flags, PLAYER) > 0
+-- Recap timestamps may be epoch or session seconds; compare against the matching clock.
+local function afterDuel(ts)
+  if not duelEnd or type(ts) ~= "number" then return true end
+  return ts > (ts > 1e9 and duelEnd.epoch or duelEnd.session)
 end
 
-local function onCombatLog()
-  local _, sub, _, sGUID, sName, sFlags, _, dGUID, dName, dFlags = CombatLogGetCurrentEventInfo()
-  if ns.Secret(sub) or ns.Secret(sGUID) or ns.Secret(sName) or ns.Secret(sFlags)
-      or ns.Secret(dGUID) or ns.Secret(dName) or ns.Secret(dFlags) then
-    ns.health.secret = ns.health.secret + 1
-    return
+local function newest(evs)
+  local t = 0
+  for _, ev in ipairs(evs) do
+    if type(ev.timestamp) == "number" and not ns.Secret(ev.timestamp) and ev.timestamp > t then t = ev.timestamp end
   end
-  if sName and hostilePlayer(sFlags) then ns.Seen(sName, sGUID) end
-  if dName and hostilePlayer(dFlags) then ns.Seen(dName, dGUID) end
-
-  if sub == "SPELL_SUMMON" and bit.band(sFlags, PLAYER) > 0 then
-    owners[dGUID] = { guid = sGUID, name = sName }
-    return
-  end
-  if not DAMAGE[sub] or dGUID ~= ns.playerGUID or dueling then return end
-  if bit.band(sFlags, HOSTILE) == 0 or bit.band(sFlags, CONTROL) == 0 then return end
-  if bit.band(sFlags, PLAYER) == 0 then
-    -- ponytail: owners only known from summons we saw; unresolved pets are skipped
-    local owner = bit.band(sFlags, PETLIKE) > 0 and owners[sGUID]
-    if not owner then return end
-    sGUID, sName = owner.guid, owner.name
-  end
-  buffer[#buffer + 1] = { t = GetTime(), guid = sGUID, name = sName }
-  if #buffer > 500 then table.remove(buffer, 1) end
+  return t
 end
 
 local function where()
@@ -59,25 +34,64 @@ local function where()
   return map, x, y
 end
 
-local function onDeath()
-  local now, list, seen = GetTime(), {}, {}
-  for i = #buffer, 1, -1 do -- newest first, so list[1] dealt the last blow
-    local b = buffer[i]
-    if now - b.t > WINDOW then break end
-    if not seen[b.guid] then
-      seen[b.guid] = true
-      list[#list + 1] = b
+-- Most recent recap: the no-argument call, else the highest id that has events.
+local function recapEvents()
+  local ok, evs = pcall(C_DeathRecap.GetRecapEvents)
+  if not (ok and type(evs) == "table" and #evs > 0) then
+    evs = nil
+    for id = 100, 1, -1 do
+      if C_DeathRecap.HasRecapEvents(id) then
+        evs = C_DeathRecap.GetRecapEvents(id)
+        break
+      end
     end
   end
-  wipe(buffer)
+  if type(evs) ~= "table" or #evs == 0 then return end
+  local n = newest(evs)
+  if n ~= 0 and n == lastRecapStamp then return end
+  return evs
+end
+
+local function attackers(evs)
+  -- newest first, so list[1] dealt the last blow (secret timestamps keep recap order)
+  local sorted = {}
+  for i, ev in ipairs(evs) do sorted[i] = ev end
+  local function stamp(ev) return (type(ev.timestamp) == "number" and not ns.Secret(ev.timestamp)) and ev.timestamp or 0 end
+  table.sort(sorted, function(a, b) return stamp(a) > stamp(b) end)
+  evs = sorted
+  local list, seen = {}, {}
+  for _, ev in ipairs(evs) do
+    local guid, name, flags, ts = ev.sourceGUID, ev.sourceName, ev.sourceFlags, ev.timestamp
+    if ns.Secret(guid) or ns.Secret(name) or ns.Secret(flags) or ns.Secret(ts) then
+      ns.health.secret = ns.health.secret + 1
+    elseif type(guid) == "string" and guid:find("^Player%-") and guid ~= ns.playerGUID and not seen[guid]
+        and (type(flags) ~= "number" or bit.band(flags, HOSTILE) > 0)
+        and afterDuel(ts) then
+      seen[guid] = true
+      list[#list + 1] = { guid = guid, name = name }
+    end
+  end
+  return list
+end
+
+local function onDeath()
   -- World PvP only: battlegrounds, arenas and every other instance are ignored.
-  if IsInInstance() or #list == 0 or not ns.guildKey then return end
+  if IsInInstance() or not ns.guildKey then return end
+  local evs = recapEvents()
+  if not evs then
+    ns.health.recap = "no recap events"
+    return
+  end
+  lastRecapStamp = newest(evs)
+  local list = attackers(evs)
+  ns.health.recap = ns.health.secret > 0 and "secret values" or "ok"
+  if #list == 0 then return end -- not a PvP death
 
   local enemies, names = {}, {}
   for i, b in ipairs(list) do
     local _, class, _, race, _, name, realm = GetPlayerInfoByGUID(b.guid)
     enemies[i] = {
-      n = ns.FullName(name or b.name, realm), c = class or "", r = race or "",
+      g = b.guid, n = ns.FullName(name or b.name, realm), c = class or "", r = race or "",
       l = ns.levels[b.guid] or -1, kb = i == 1,
     }
     names[i] = enemies[i].n
@@ -98,25 +112,13 @@ end
 local f = CreateFrame("Frame")
 f:RegisterEvent("PLAYER_LOGIN")
 f:RegisterEvent("PLAYER_DEAD")
-for _, ev in ipairs({ "DUEL_REQUESTED", "DUEL_INBOUNDS", "DUEL_OUTOFBOUNDS", "DUEL_FINISHED" }) do
-  f:RegisterEvent(ev)
-end
+f:RegisterEvent("DUEL_FINISHED")
 f:SetScript("OnEvent", function(_, ev)
-  if ev == "COMBAT_LOG_EVENT_UNFILTERED" then
-    onCombatLog()
-  elseif ev == "PLAYER_DEAD" then
-    onDeath()
+  if ev == "PLAYER_DEAD" then
+    C_Timer.After(1, onDeath) -- give the client a moment to build the recap
   elseif ev == "PLAYER_LOGIN" then
     ns.playerGUID = UnitGUID("player")
-    local ok, err = pcall(f.RegisterEvent, f, "COMBAT_LOG_EVENT_UNFILTERED")
-    ns.health.combatLog = ok and "ok" or ("unavailable: " .. tostring(err))
-    if type(StartDuel) == "function" then
-      hooksecurefunc("StartDuel", function() dueling = true end)
-    end
-  elseif ev == "DUEL_FINISHED" then
-    dueling = false
-    wipe(buffer) -- duel damage must never count toward a later world-PvP death
   else
-    dueling = true
+    duelEnd = { epoch = time(), session = GetTime() }
   end
 end)

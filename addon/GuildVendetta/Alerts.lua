@@ -52,11 +52,11 @@ end
 
 function ns.Seen(name, guid)
   if not name or not ns.settings then return end
-  local row = ns.view.byName[ns.FullName(name)]
+  local row = (guid and not ns.Secret(guid) and ns.view.byKey[guid]) or ns.view.byKey[ns.FullName(name)]
   if not row or IsInInstance() then return end -- world PvP only
   local now = GetTime()
-  if lastAlert[row.name] and now - lastAlert[row.name] < ns.settings.cooldown * 60 then return end
-  lastAlert[row.name] = now
+  if lastAlert[row.key] and now - lastAlert[row.key] < ns.settings.cooldown * 60 then return end
+  lastAlert[row.key] = now
   ns.Alert(row)
 end
 

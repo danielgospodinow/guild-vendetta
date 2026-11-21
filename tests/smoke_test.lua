@@ -103,16 +103,21 @@ for _, c in ipairs({ A, B }) do
 end
 assert(A.ns.guildKey == "Horde Hunters-Mirage", tostring(A.ns.guildKey))
 
--- A takes damage from a hostile player, then dies
-local cleu
-A.env.CombatLogGetCurrentEventInfo = function() return unpack(cleu) end
-cleu = { 0, "SPELL_DAMAGE", false, "Player-2-G", "Gankston", 0x40 + 0x400 + 0x100, 0, "Player-1-Thrall", "Thrall", 0x511 }
-A.fire("COMBAT_LOG_EVENT_UNFILTERED")
-cleu = { 0, "SWING_DAMAGE", false, "Player-2-S", "Stabbz-OtherRealm", 0x40 + 0x400 + 0x100, 0, "Player-1-Thrall", "Thrall", 0x511 }
-now = now + 5
-A.fire("COMBAT_LOG_EVENT_UNFILTERED")
+-- A dies; the death recap lists two hostile players, a mob, and A itself (fall damage)
+local HOSTILE_PLAYER = 0x40 + 0x400 + 0x100
+A.env.C_DeathRecap = {
+  GetRecapEvents = function() return {
+    { timestamp = 1763700990, sourceGUID = "Player-2-G", sourceName = "Gankston", sourceFlags = HOSTILE_PLAYER },
+    { timestamp = 1763700995, sourceGUID = "Player-2-S", sourceName = "Stabbz-OtherRealm", sourceFlags = HOSTILE_PLAYER },
+    { timestamp = 1763700992, sourceGUID = "Creature-0-1", sourceName = "Raptor", sourceFlags = 0xa48 },
+    { timestamp = 1763700993, sourceGUID = "Player-1-Thrall", sourceName = "Thrall", sourceFlags = 0x511 },
+    { timestamp = 1763700991, sourceGUID = "Player-2-G", sourceName = "Gankston", sourceFlags = HOSTILE_PLAYER },
+  } end,
+  HasRecapEvents = function() return false end,
+}
 A.fire("PLAYER_DEAD")
-A.runTimers()
+A.runTimers() -- recap is read 1s after death
+A.runTimers() -- view rebuild
 local n = 0
 for id, e in pairs(A.ns.events) do n = n + 1; print("A event", id, #e.en, e.en[1].n, e.en[1].kb) end
 assert(n == 1)
@@ -129,12 +134,31 @@ assert(#B.ns.view.rows == 2, "B did not get the kill")
 print("B printed:", B.printed[#B.printed])
 
 -- B removes Gankston; A gets it; Stabbz stays
-B.ns.Remove("Gankston-Mirage")
+B.ns.Remove("Player-2-G")
 B.env.__tick()
 for _, m in ipairs(wire) do A.fire("CHAT_MSG_ADDON", m[1], m[2], m[3], m[4]) end
 wire = {}
 A.runTimers()
 assert(#A.ns.view.rows == 1 and A.ns.view.rows[1].name == "Stabbz-OtherRealm", "removal not applied")
+
+-- a second death that reuses the same (stale) recap is not recorded twice
+A.fire("PLAYER_DEAD"); A.runTimers(); A.runTimers()
+local an = 0
+for _ in pairs(A.ns.events) do an = an + 1 end
+assert(an == 2, "stale recap recorded again: " .. an)
+
+-- a big kill (many attackers) spans several chunks and is reassembled
+local big = { k = "K", t = 1763701100, vic = "Jaina-Mirage", vlvl = 40, vclass = "MAGE", zone = "Ashenvale", sub = "",
+  en = {} }
+for i = 1, 20 do big.en[i] = { n = "Raider" .. i .. "-Mirage", g = "Player-9-" .. i, c = "WARRIOR", r = "Human", l = 60, kb = i == 1 } end
+big.id = B.ns.KillId(big.vic, big.t)
+B.ns.AddEvent(big); B.ns.Broadcast(big)
+for _ = 1, 10 do B.env.__tick() end
+assert(#wire > 1, "expected multiple chunks, got " .. #wire)
+for _, m in ipairs(wire) do A.fire("CHAT_MSG_ADDON", m[1], m[2], m[3], m[4]) end
+wire = {}
+A.runTimers()
+assert(A.ns.events[big.id] and #A.ns.events[big.id].en == 20, "chunked kill not reassembled")
 
 -- catch-up: a new client C logs in with an empty log and gets everything via H/E
 local C = client("Rexxar")
@@ -156,8 +180,8 @@ pump()
 local cn = 0
 for _ in pairs(C.ns.events) do cn = cn + 1 end
 C.runTimers()
-assert(cn == 2, "C has " .. cn .. " events")
-assert(#C.ns.view.rows == 1)
+assert(cn == 3, "C has " .. cn .. " events")
+assert(#C.ns.view.rows == 21)
 
 -- alert on seeing a listed enemy via nameplate
 A.env.UnitExists = function() return true end

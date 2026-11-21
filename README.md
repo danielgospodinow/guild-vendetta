@@ -7,7 +7,7 @@ A **World of Warcraft: Forever** addon that keeps a guild-shared **vendetta list
 ## Features
 
 - **Automatic kill tracking.** When a guildmate dies to enemy players, the kill is recorded the moment it happens.
-- **Every contributor counts.** Everyone who damaged the victim in the **last 60 seconds** before death is listed, and the killing blow is marked. Pet kills are credited to the pet's owner when the game reveals who that is.
+- **Every contributor counts.** Every enemy player in the victim's **death recap** (Blizzard's "what killed you" summary) is listed, and the killing blow is marked. The design wanted everyone from the last 60 seconds, but WoW: Forever blocks the combat log for addons, so the recap is the only source (see [Known limitations](#known-limitations)).
 - **Kill rank.** Each enemy shows how many guildmates they have killed, and the list is sorted by that count, so the worst offender is #1.
 - **Proximity alerts.** You get a red screen flash, a raid-warning message and a sound when a listed enemy is seen nearby. Each part can be turned off. The same enemy alerts at most once every 5 minutes by default.
 - **Shared across the guild, live.** Every guildmate running the addon sees the same list, and updates arrive within about a second.
@@ -57,7 +57,7 @@ The addon **only tracks world PvP**. Deaths in **battlegrounds, arenas, and duel
 | `/gv` or `/vendetta` | Open or close the window |
 | `/gv test` | Preview the alert (flash, message, sound) |
 | `/gv sync` | Ask online guildmates for anything you're missing |
-| `/gv status` | Show the guild, entry counts, and whether the game lets the addon read the combat log |
+| `/gv status` | Show the guild, entry counts, and whether the last death recap was readable |
 
 ## Install
 
@@ -73,7 +73,7 @@ The addon targets the WoW: Forever client (interface `16001`).
 
 ### Probe addon (diagnostics)
 
-`probe/GuildVendettaProbe` is a throwaway diagnostic addon ([#1](https://github.com/danielgospodinow/guild-vendetta/issues/1)). It logs what the game lets addons read: combat log, death info, enemy names and levels, and guild messages. Link it the same way, play a bit of world PvP, then `/reload`. Its log is saved to `WTF/Account/<account>/SavedVariables/GuildVendettaProbe.lua`. `/gvp ping` tests guild messages; guildmates running the probe answer with a pong.
+`probe/GuildVendettaProbe` is a throwaway diagnostic addon ([#1](https://github.com/danielgospodinow/guild-vendetta/issues/1)). It logs what the game lets addons read: the death recap, name lookups, enemy names and levels, and guild messages. Link it the same way, play a bit of world PvP, then `/reload`. Its log is saved to `WTF/Account/<account>/SavedVariables/GuildVendettaProbe.lua`. `/gvp ping` tests guild messages; guildmates running the probe answer with a pong.
 
 ## How it works
 
@@ -125,7 +125,7 @@ The list you see is **computed** from the log. An enemy shows up if they have at
 
 ### Live updates: the death hook
 
-The game fires an event the instant you die (`PLAYER_DEAD`). The addon builds the `KILL` event from the last 60 seconds of combat log and **broadcasts it immediately**, so online guildmates have it within about a second.
+The game fires an event the instant you die (`PLAYER_DEAD`). A second later the addon reads your **death recap**, builds the `KILL` event from the enemy players in it, and **broadcasts it immediately**, so online guildmates have it within about a second.
 
 ```mermaid
 sequenceDiagram
@@ -134,7 +134,7 @@ sequenceDiagram
     participant O as Online guildmates' addons
     G->>T: damage, damage, killing blow
     Note over T: PLAYER_DEAD fires<br/>world PvP? not a duel/BG/arena?
-    T->>T: build KILL from last 60s of hits<br/>append to own log
+    T->>T: read death recap, build KILL<br/>append to own log
     T-->>O: hidden GUILD message: KILL
     O->>O: append to log, refresh list
     Note over O: Gankston now on everyone's list
@@ -171,14 +171,13 @@ The catch: **a sync can only come from guildmates who are online.** If a kill ha
 The game has no "scan the area" feature, so "nearby" means the enemy has been **seen by your client** in one of these ways:
 
 - their nameplate appears,
-- you target or mouse over them,
-- they show up in a combat-log event near you.
+- you target or mouse over them.
 
 That's roughly nameplate range.
 
 ```mermaid
 flowchart LR
-    S["Nameplate / target / mouseover / combat log"] --> M{On the list?<br/>not removed}
+    S["Nameplate / target / mouseover"] --> M{On the list?<br/>not removed}
     M -- no --> X[ignore]
     M -- yes --> C{Alerted in the<br/>last 5 min?}
     C -- yes --> X
@@ -187,8 +186,10 @@ flowchart LR
 
 ## Known limitations
 
-- **WoW: Forever addon restrictions.** Forever reportedly uses Midnight-era rules that hide some combat data (player names, combat-log details) from addons. This is unconfirmed by Blizzard. The first task is a [probe (#1)](https://github.com/danielgospodinow/guild-vendetta/issues/1) that checks in the live client what the addon can actually read. The design may change based on the result.
-- **Only the victim's client can record the kill**, because only it sees the full combat log of the death. Guildmates without the addon won't contribute kills.
+- **No combat log on WoW: Forever.** Forever blocks the combat log for addons, and trying to use it triggers *"blocked from an action only available to the Blizzard UI"*. Kills come from the **death recap** instead. The recap only covers the last few hits before death, so an enemy who hit you earlier in the fight may be missing. Whether the recap holds readable names and character IDs is being checked by the [probe (#1)](https://github.com/danielgospodinow/guild-vendetta/issues/1).
+- **Enemies are matched by character ID**, not by name. On Forever, characters can have a two-part name (for example *Todor Zhivkoff*) and the realm comes back empty, so names alone are ambiguous.
+- **Only the victim's client can record the kill**, because only it has the death recap. Guildmates without the addon won't contribute kills.
+- **Pet kills aren't credited to the owner**, because the recap doesn't say who owns a pet.
 - **Level may be `??`** when the game hides the enemy's level.
 - **Offline catch-up needs a guildmate online** who has the missing data (see above).
 
@@ -215,9 +216,9 @@ This would add one central history, catch-up even when nobody is online, and a p
 ```
 addon/GuildVendetta/       # the WoW addon (plain Lua, no libraries)
   Core.lua                 #   event log, ranked view, wire encoding, sync digests
-  Capture.lua              #   60s hit buffer + death hook -> KILL
+  Capture.lua              #   death hook + death recap -> KILL
   Sync.lua                 #   hidden guild messages: live events + login catch-up
-  Alerts.lua               #   nameplate/target/mouseover/combat-log detection, flash/message/sound
+  Alerts.lua               #   nameplate/target/mouseover detection, flash/message/sound
   UI.lua                   #   window, minimap button, settings panel, /gv
 probe/GuildVendettaProbe/  # diagnostic addon for the live client (#1)
 tests/                     # plain-Lua tests, no WoW needed

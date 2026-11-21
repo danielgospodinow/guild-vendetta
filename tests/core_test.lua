@@ -44,11 +44,22 @@ assert(v.rows[1].kills[1].vic == "Jaina-Mirage") -- newest kill first
 
 add(log, remove("Gankston-Mirage", 1763700100))
 v = ns.BuildView(log)
-assert(not v.byName["Gankston-Mirage"] and v.byName["Stabbz-Mirage"].count == 1)
+assert(not v.byKey["Gankston-Mirage"] and v.byKey["Stabbz-Mirage"].count == 1)
 
 add(log, kill("Thrall-Mirage", 1763700200, { { n = "Gankston-Mirage", c = "ROGUE", r = "Scourge", l = 60, kb = true } }))
 v = ns.BuildView(log)
-assert(v.byName["Gankston-Mirage"].count == 1) -- back, only with the post-removal kill
+assert(v.byKey["Gankston-Mirage"].count == 1) -- back, only with the post-removal kill
+
+-- GUID is the identity when known: same GUID under two spellings is one enemy, removal by GUID
+local g1 = kill("Jaina-Mirage", 1763700300, { { n = "Todor", g = "Player-6842-AAA", c = "PALADIN", r = "Scourge", l = 32, kb = true } })
+local g2 = kill("Rexxar-Mirage", 1763700400, { { n = "Todor-Zhivkoff", g = "Player-6842-AAA", c = "PALADIN", r = "Scourge", l = -1, kb = true } })
+assert(ns.Decode(ns.Encode(g1)).en[1].g == "Player-6842-AAA")
+add(log, g1); add(log, g2)
+v = ns.BuildView(log)
+assert(v.byKey["Player-6842-AAA"].count == 2 and v.byKey["Player-6842-AAA"].level == 32)
+add(log, remove("Player-6842-AAA", 1763700500))
+assert(not ns.BuildView(log).byKey["Player-6842-AAA"])
+log[g1.id], log[g2.id], log[ns.RemoveId("Player-6842-AAA", 1763700500)] = nil, nil, nil
 
 -- Digests: identical logs match; a missing event is detected in both directions
 local a, b = {}, {}

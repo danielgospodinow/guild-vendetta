@@ -16,16 +16,16 @@ local function ago(t)
   return math.floor(d / 86400) .. "d"
 end
 
-function ns.Remove(name)
-  local e = { k = "R", t = GetServerTime(), en = name, by = ns.FullName(UnitName("player")) }
-  e.id = ns.RemoveId(name, e.t)
+function ns.Remove(key)
+  local e = { k = "R", t = GetServerTime(), en = key, by = ns.FullName(UnitName("player")) }
+  e.id = ns.RemoveId(key, e.t)
   if ns.AddEvent(e) then ns.Broadcast(e) end
 end
 
 StaticPopupDialogs.GUILDVENDETTA_REMOVE = {
   text = "Remove %s from the guild's vendetta list?\n\nThis applies to everyone in the guild.",
   button1 = YES, button2 = NO, timeout = 0, whileDead = true, hideOnEscape = true,
-  OnAccept = function(_, name) ns.Remove(name) end,
+  OnAccept = function(_, key) ns.Remove(key) end,
 }
 
 -- Window -----------------------------------------------------------------------
@@ -96,12 +96,12 @@ local function setupRow(button)
   button.remove:SetPoint("RIGHT", 2, 0)
   button.remove:SetScript("OnClick", function()
     local row = button.item.row
-    StaticPopup_Show("GUILDVENDETTA_REMOVE", ns.Colored(row.name, row.class), nil, row.name)
+    StaticPopup_Show("GUILDVENDETTA_REMOVE", ns.Colored(row.name, row.class), nil, row.key)
   end)
   button:SetScript("OnClick", function()
     local item = button.item
     if item.row then
-      expanded[item.row.name] = not expanded[item.row.name]
+      expanded[item.row.key] = not expanded[item.row.key]
       ns.RefreshWindow()
     end
   end)
@@ -130,7 +130,7 @@ local function initRow(button, item)
   local last = row.kills[1]
   local v = button.cols
   v[1]:SetText(row.rank)
-  v[2]:SetText((expanded[row.name] and "- " or "+ ") .. ns.Colored(row.name, row.class))
+  v[2]:SetText((expanded[row.key] and "- " or "+ ") .. ns.Colored(row.name, row.class))
   v[3]:SetText(row.count)
   v[4]:SetText(ns.Level(row.level))
   v[5]:SetText(ns.Colored(last.vic, last.vclass))
@@ -151,7 +151,7 @@ function ns.RefreshWindow()
     if filter == "" or row.name:lower():find(filter, 1, true) then
       shown = shown + 1
       items[#items + 1] = { row = row }
-      if expanded[row.name] then
+      if expanded[row.key] then
         for _, e in ipairs(row.kills) do items[#items + 1] = { kill = e } end
       end
     end
@@ -160,8 +160,8 @@ function ns.RefreshWindow()
   count:SetText(shown .. (shown == 1 and " enemy" or " enemies"))
 
   local h = ns.health
-  if h.combatLog ~= "ok" or h.secret > 0 then
-    footer:SetText("|cffff2020Combat log restricted by the game: deaths may not be recorded (/gv status)|r")
+  if h.secret > 0 or h.recap == "no recap events" then
+    footer:SetText("|cffff2020The game hid your last death's details: it may not be recorded (/gv status)|r")
   elseif not ns.guildKey then
     footer:SetText("Not in a guild.")
   else
@@ -263,8 +263,8 @@ SlashCmdList.GUILDVENDETTA = function(arg)
   elseif arg == "status" then
     local n = 0
     for _ in pairs(ns.events) do n = n + 1 end
-    ns.Print("guild=%s events=%d enemies=%d combatLog=%s secretEvents=%d", tostring(ns.guildKey), n,
-      #ns.view.rows, ns.health.combatLog, ns.health.secret)
+    ns.Print("guild=%s events=%d enemies=%d deathRecap=%s secretValues=%d", tostring(ns.guildKey), n,
+      #ns.view.rows, ns.health.recap, ns.health.secret)
   elseif arg == "" then
     ns.ToggleWindow()
   else

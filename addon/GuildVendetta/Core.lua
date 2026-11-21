@@ -4,14 +4,15 @@ local _, ns = ...
 
 ns.DEFAULTS = { flash = true, message = true, sound = true, cooldown = 5, minimap = true, minimapAngle = 200 }
 ns.events = {}      -- current guild's log: id -> event
-ns.view = { rows = {}, byName = {} }
+ns.view = { rows = {}, byKey = {} }
 ns.listeners = {}   -- called after the view is rebuilt
 ns.onLoaded = {}    -- called once settings are loaded
 ns.onGuild = {}     -- called when the guild log is ready (login or guild change)
 
 -- Encoding -----------------------------------------------------------------
--- KILL:   K~t~victim~vlvl~vclass~zone~sub~map~x~y~enemy^enemy...   enemy = name,class,race,level,kb
--- REMOVE: R~t~enemy~by
+-- KILL:   K~t~victim~vlvl~vclass~zone~sub~map~x~y~enemy^enemy...   enemy = name,class,race,level,kb,guid
+-- REMOVE: R~t~enemyKey~by
+-- Enemies are identified by GUID (names are ambiguous on Forever); name is the fallback key.
 -- Ids are derived from content, never sent, so a peer can't forge a mismatching id.
 
 local function clean(s, max)
@@ -25,15 +26,16 @@ local function num(s, lo, hi)
 end
 
 function ns.KillId(victim, t) return "K:" .. victim .. ":" .. t end
+function ns.EnemyKey(x) return (x.g and x.g ~= "") and x.g or x.n end
 function ns.RemoveId(enemy, t) return "R:" .. enemy .. ":" .. t end
 
 function ns.Encode(e)
   if e.k == "R" then
-    return table.concat({ "R", e.t, clean(e.en), clean(e.by) }, "~")
+    return table.concat({ "R", e.t, clean(e.en, 80), clean(e.by) }, "~")
   end
   local en = {}
   for i, x in ipairs(e.en) do
-    en[i] = table.concat({ clean(x.n), clean(x.c, 16), clean(x.r, 24), x.l or -1, x.kb and 1 or 0 }, ",")
+    en[i] = table.concat({ clean(x.n), clean(x.c, 16), clean(x.r, 24), x.l or -1, x.kb and 1 or 0, clean(x.g, 40) }, ",")
   end
   return table.concat({ "K", e.t, clean(e.vic), e.vlvl or -1, clean(e.vclass, 16), clean(e.zone),
     clean(e.sub), e.map or "", e.x and string.format("%.3f", e.x) or "",
@@ -62,8 +64,8 @@ function ns.Decode(s)
   }
   for _, part in ipairs(split(f[11], "^")) do
     local p = split(part, ",")
-    if #p ~= 5 or p[1] == "" then return end
-    e.en[#e.en + 1] = { n = p[1], c = p[2], r = p[3], l = num(p[4], -1, 200) or -1, kb = p[5] == "1" }
+    if (#p ~= 5 and #p ~= 6) or p[1] == "" then return end
+    e.en[#e.en + 1] = { n = p[1], c = p[2], r = p[3], l = num(p[4], -1, 200) or -1, kb = p[5] == "1", g = p[6] or "" }
   end
   if #e.en == 0 or #e.en > 40 then return end
   e.id = ns.KillId(e.vic, t)
@@ -79,15 +81,16 @@ function ns.BuildView(events)
   for _, e in pairs(events) do
     if e.k == "R" and e.t > (removed[e.en] or 0) then removed[e.en] = e.t end
   end
-  local byName, rows = {}, {}
+  local byKey, rows = {}, {}
   for _, e in pairs(events) do
     if e.k == "K" then
       for _, x in ipairs(e.en) do
-        if e.t > (removed[x.n] or 0) then
-          local row = byName[x.n]
+        local key = ns.EnemyKey(x)
+        if e.t > (removed[key] or 0) then
+          local row = byKey[key]
           if not row then
-            row = { name = x.n, kills = {}, last = 0, level = -1, levelT = 0 }
-            byName[x.n] = row
+            row = { key = key, name = x.n, kills = {}, last = 0, level = -1, levelT = 0 }
+            byKey[key] = row
             rows[#rows + 1] = row
           end
           row.kills[#row.kills + 1] = e
@@ -108,7 +111,7 @@ function ns.BuildView(events)
     return a.name < b.name
   end)
   for i, row in ipairs(rows) do row.rank = i end
-  return { rows = rows, byName = byName }
+  return { rows = rows, byKey = byKey }
 end
 
 -- Sync digests ------------------------------------------------------------------
@@ -187,8 +190,9 @@ end
 function ns.FullName(name, realm)
   if not name then return end
   if realm and realm ~= "" then return name .. "-" .. realm:gsub("%s", "") end
-  if name:find("-", 1, true) then return name end
-  return name .. "-" .. GetNormalizedRealmName()
+  realm = GetNormalizedRealmName()
+  if name:find("-", 1, true) or not realm or realm == "" then return name end
+  return name .. "-" .. realm
 end
 
 function ns.Print(fmt, ...)
@@ -199,7 +203,7 @@ end
 function ns.LoadGuild()
   local guild = GetGuildInfo("player")
   if not guild then return false end
-  local key = guild .. "-" .. GetNormalizedRealmName()
+  local key = guild .. "-" .. (GetNormalizedRealmName() or "")
   if ns.guildKey == key then return true end
   ns.guildKey = key
   GuildVendettaDB.guilds[key] = GuildVendettaDB.guilds[key] or { events = {} }
