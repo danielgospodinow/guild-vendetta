@@ -42,6 +42,9 @@ frame:SetPoint("CENTER")
 frame:SetMovable(true)
 frame:EnableMouse(true)
 frame:SetClampedToScreen(true)
+-- Above Blizzard panels and other addons' frames, below popups (our remove confirmation is a popup)
+frame:SetFrameStrata("HIGH")
+frame:SetToplevel(true) -- clicking it raises it over other HIGH frames
 frame:RegisterForDrag("LeftButton")
 frame:SetScript("OnDragStart", frame.StartMoving)
 frame:SetScript("OnDragStop", frame.StopMovingOrSizing)
@@ -245,7 +248,10 @@ function ns.RefreshWindow()
 end
 
 search:HookScript("OnTextChanged", ns.RefreshWindow)
-frame:SetScript("OnShow", ns.RefreshWindow)
+frame:SetScript("OnShow", function()
+  frame:Raise()
+  ns.RefreshWindow()
+end)
 table.insert(ns.listeners, ns.RefreshWindow)
 
 function ns.ToggleWindow() frame:SetShown(not frame:IsShown()) end
