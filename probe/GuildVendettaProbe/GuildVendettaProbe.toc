@@ -1,0 +1,6 @@
+## Interface: 16001
+## Title: GuildVendetta Probe
+## Notes: Throwaway probe: logs what WoW Forever lets addons read (see issue #1)
+## SavedVariables: GuildVendettaProbeDB
+
+GuildVendettaProbe.lua

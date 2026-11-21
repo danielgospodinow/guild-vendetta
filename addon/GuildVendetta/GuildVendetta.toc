@@ -1,0 +1,13 @@
+## Interface: 16001
+## Title: Guild Vendetta
+## Notes: Guild-shared list of enemy players who killed you or your guildmates in world PvP, with proximity alerts.
+## Author: Daniel Gospodinow
+## Version: 0.1.0
+## IconTexture: Interface\Icons\Ability_Warrior_Revenge
+## SavedVariables: GuildVendettaDB
+
+Core.lua
+Capture.lua
+Sync.lua
+Alerts.lua
+UI.lua
