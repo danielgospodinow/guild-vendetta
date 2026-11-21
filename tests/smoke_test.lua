@@ -14,7 +14,8 @@ local function mock()
   })
 end
 
-local function client(name)
+local function client(first, second)
+  local name = first
   local frames, timers, printed = {}, {}, {}
   local env = setmetatable({}, { __index = _G })
   env._G = env
@@ -41,7 +42,7 @@ local function client(name)
   env.Enum = { SendAddonMessageResult = { AddonMessageThrottle = 3, ChannelThrottle = 8 } }
   env.GetNormalizedRealmName = function() return "Mirage" end
   env.GetGuildInfo = function() return "Horde Hunters" end
-  env.UnitName = function(u) if u == "player" then return name end end
+  env.UnitName = function(u) if u == "player" then return first, second end end -- Forever: two names
   env.UnitGUID = function(u) if u == "player" then return "Player-1-" .. name end end
   env.UnitLevel = function() return 52 end
   env.UnitClass = function() return "Warrior", "WARRIOR" end
@@ -58,7 +59,7 @@ local function client(name)
   }
   env.C_ChatInfo = {
     RegisterAddonMessagePrefix = function() return true end,
-    SendAddonMessage = function(p, msg, ch) wire[#wire + 1] = { p, msg, ch, name .. "-Mirage" }; return 0 end,
+    SendAddonMessage = function(p, msg, ch) wire[#wire + 1] = { p, msg, ch, first .. "-" .. second }; return 0 end,
   }
   env.CreateFrame = function(_, fname)
     local fr = mock()
@@ -95,7 +96,7 @@ local function client(name)
   return c
 end
 
-local A, B = client("Thrall"), client("Jaina")
+local A, B = client("Thrall", "Durotan"), client("Jaina", "Proudmoore")
 for _, c in ipairs({ A, B }) do
   c.fire("ADDON_LOADED", "GuildVendetta")
   c.fire("PLAYER_LOGIN")
@@ -107,11 +108,11 @@ assert(A.ns.guildKey == "Horde Hunters-Mirage", tostring(A.ns.guildKey))
 local HOSTILE_PLAYER = 0x40 + 0x400 + 0x100
 A.env.C_DeathRecap = {
   GetRecapEvents = function() return {
-    { timestamp = 1763700990, sourceGUID = "Player-2-G", sourceName = "Gankston", sourceFlags = HOSTILE_PLAYER },
-    { timestamp = 1763700995, sourceGUID = "Player-2-S", sourceName = "Stabbz-OtherRealm", sourceFlags = HOSTILE_PLAYER },
+    { timestamp = 1763700990, sourceGUID = "Player-2-G", sourceName = "Gankston Doe", sourceFlags = HOSTILE_PLAYER },
+    { timestamp = 1763700995, sourceGUID = "Player-2-S", sourceName = "Stabbz Roe", sourceFlags = HOSTILE_PLAYER },
     { timestamp = 1763700992, sourceGUID = "Creature-0-1", sourceName = "Raptor", sourceFlags = 0xa48 },
-    { timestamp = 1763700993, sourceGUID = "Player-1-Thrall", sourceName = "Thrall", sourceFlags = 0x511 },
-    { timestamp = 1763700991, sourceGUID = "Player-2-G", sourceName = "Gankston", sourceFlags = HOSTILE_PLAYER },
+    { timestamp = 1763700993, sourceGUID = "Player-1-Thrall", sourceName = "Thrall Durotan", sourceFlags = 0x511 },
+    { timestamp = 1763700991, sourceGUID = "Player-2-G", sourceName = "Gankston Doe", sourceFlags = HOSTILE_PLAYER },
   } end,
   HasRecapEvents = function() return false end,
 }
@@ -127,11 +128,12 @@ assert(#A.ns.view.rows == 2, #A.ns.view.rows)
 A.env.__tick()
 assert(#wire >= 1, "nothing sent")
 for _, m in ipairs(wire) do print("wire", m[1], m[3], m[2]) end
-for _, m in ipairs(wire) do if m[4] ~= "Jaina-Mirage" then B.fire("CHAT_MSG_ADDON", m[1], m[2], m[3], m[4]) end end
+for _, m in ipairs(wire) do if m[4] ~= "Jaina-Proudmoore" then B.fire("CHAT_MSG_ADDON", m[1], m[2], m[3], m[4]) end end
 wire = {}
 B.runTimers()
 assert(#B.ns.view.rows == 2, "B did not get the kill")
 print("B printed:", B.printed[#B.printed])
+assert(B.printed[#B.printed]:find("Thrall Durotan was killed by Stabbz Roe", 1, true), "two-part names not shown")
 
 -- B removes Gankston; A gets it; Stabbz stays
 B.ns.Remove("Player-2-G")
@@ -139,7 +141,7 @@ B.env.__tick()
 for _, m in ipairs(wire) do A.fire("CHAT_MSG_ADDON", m[1], m[2], m[3], m[4]) end
 wire = {}
 A.runTimers()
-assert(#A.ns.view.rows == 1 and A.ns.view.rows[1].name == "Stabbz-OtherRealm", "removal not applied")
+assert(#A.ns.view.rows == 1 and A.ns.view.rows[1].name == "Stabbz Roe", "removal not applied")
 
 -- a second death that reuses the same (stale) recap is not recorded twice
 A.fire("PLAYER_DEAD"); A.runTimers(); A.runTimers()
@@ -161,7 +163,7 @@ A.runTimers()
 assert(A.ns.events[big.id] and #A.ns.events[big.id].en == 20, "chunked kill not reassembled")
 
 -- catch-up: a new client C logs in with an empty log and gets everything via H/E
-local C = client("Rexxar")
+local C = client("Rexxar", "Misha")
 C.fire("ADDON_LOADED", "GuildVendetta"); C.fire("PLAYER_LOGIN"); C.runTimers()
 C.env.__tick() -- sends H
 local function pump()
@@ -169,7 +171,7 @@ local function pump()
     local msgs = wire; wire = {}
     for _, m in ipairs(msgs) do
       for _, c in ipairs({ A, B, C }) do
-        if m[4] ~= c.ns.FullName(c.env.UnitName("player")) then c.fire("CHAT_MSG_ADDON", m[1], m[2], m[3], m[4]) end
+        if c.ns.Name(m[4]) ~= c.ns.Name(c.env.UnitName("player")) then c.fire("CHAT_MSG_ADDON", m[1], m[2], m[3], m[4]) end
       end
     end
     for _, c in ipairs({ A, B, C }) do c.runTimers(); c.env.__tick() end
@@ -186,7 +188,7 @@ assert(#C.ns.view.rows == 21)
 -- alert on seeing a listed enemy via nameplate
 A.env.UnitExists = function() return true end
 A.env.UnitIsPlayer = function() return true end
-A.env.UnitName = function(u) if u == "player" then return "Thrall" end return "Stabbz", "OtherRealm" end
+A.env.UnitName = function(u) if u == "player" then return "Thrall", "Durotan" end return "Stabbz", "Roe" end
 A.env.UnitGUID = function() return "Player-2-S" end
 A.fire("NAME_PLATE_UNIT_ADDED", "nameplate1")
 print("A alert:", A.printed[#A.printed])

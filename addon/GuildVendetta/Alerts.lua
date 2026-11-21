@@ -6,7 +6,6 @@ local lastAlert = {} -- enemy name -> GetTime() of last alert
 
 function ns.Colored(name, class)
   local c = class and RAID_CLASS_COLORS[class]
-  name = Ambiguate(name, "none")
   return c and ("|c" .. c.colorStr .. name .. "|r") or name
 end
 
@@ -41,7 +40,7 @@ end
 function ns.Alert(row)
   local s = ns.settings
   local class = LOCALIZED_CLASS_NAMES_MALE[row.class] or row.class or "?"
-  local victim = Ambiguate(row.kills[1].vic, "guild")
+  local victim = row.kills[1].vic
   local what = row.count == 1 and ("killed " .. victim) or ("killed " .. row.count .. " guildies, last " .. victim)
   local text = string.format("VENDETTA: %s (%s, %s) %s", ns.Colored(row.name, row.class), class, ns.Level(row.level), what)
   if s.message then RaidNotice_AddMessage(RaidWarningFrame, text, ChatTypeInfo["RAID_WARNING"]) end
@@ -52,7 +51,7 @@ end
 
 function ns.Seen(name, guid)
   if not name or not ns.settings then return end
-  local row = (guid and not ns.Secret(guid) and ns.view.byKey[guid]) or ns.view.byKey[ns.FullName(name)]
+  local row = (guid and not ns.Secret(guid) and ns.view.byKey[guid]) or ns.view.byKey[name]
   if not row or IsInInstance() then return end -- world PvP only
   local now = GetTime()
   if lastAlert[row.key] and now - lastAlert[row.key] < ns.settings.cooldown * 60 then return end
@@ -62,11 +61,11 @@ end
 
 local function onUnit(unit)
   if not UnitExists(unit) then return end
-  local isPlayer, name, realm = UnitIsPlayer(unit), UnitName(unit)
+  local isPlayer, name, second = UnitIsPlayer(unit), UnitName(unit)
   local guid, level = UnitGUID(unit), UnitLevel(unit)
-  if ns.Secret(isPlayer) or ns.Secret(name) or ns.Secret(realm) or not isPlayer then return end
+  if ns.Secret(isPlayer) or ns.Secret(name) or ns.Secret(second) or not isPlayer then return end
   if not ns.Secret(guid) and not ns.Secret(level) and level > 0 then ns.levels[guid] = level end
-  ns.Seen(ns.FullName(name, realm), guid)
+  ns.Seen(ns.Name(name, second), guid)
 end
 
 local f = CreateFrame("Frame")

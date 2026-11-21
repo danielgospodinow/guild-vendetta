@@ -187,12 +187,15 @@ function ns.AddEvent(e)
   return true
 end
 
-function ns.FullName(name, realm)
-  if not name then return end
-  if realm and realm ~= "" then return name .. "-" .. realm:gsub("%s", "") end
-  realm = GetNormalizedRealmName()
-  if name:find("-", 1, true) or not realm or realm == "" then return name end
-  return name .. "-" .. realm
+-- WoW: Forever characters have two names (e.g. "Todor Zhivkoff"); APIs return them as
+-- (first, second) or as "First-Second". Everything the addon stores and shows uses "First Second".
+function ns.Name(first, second)
+  if type(first) ~= "string" or first == "" then return end
+  first = first:gsub("%-", " ")
+  if type(second) == "string" and second ~= "" and not first:find(" ", 1, true) then
+    return first .. " " .. second
+  end
+  return first
 end
 
 function ns.Print(fmt, ...)

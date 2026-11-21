@@ -81,9 +81,9 @@ local function handle(kind, text, sender)
     if not e then return end
     recent[e.id] = GetTime()
     if ns.AddEvent(e) then
-      ns.guildDB.lastSync = { t = time(), from = Ambiguate(sender, "guild") }
+      ns.guildDB.lastSync = { t = time(), from = ns.Name(sender) }
       if e.k == "K" and GetServerTime() - e.t < 120 then
-        ns.Print("%s was killed by %s in %s.", Ambiguate(e.vic, "guild"), Ambiguate(e.en[1].n, "none"), e.zone)
+        ns.Print("%s was killed by %s in %s.", e.vic, e.en[1].n, e.zone)
       end
     end
   elseif kind == "H" or kind == "h" then
@@ -97,7 +97,7 @@ local function handle(kind, text, sender)
 end
 
 local function onMessage(prefix, msg, channel, sender)
-  if prefix ~= PREFIX or channel ~= "GUILD" or sender == me or not ns.guildKey or #msg < 5 then return end
+  if prefix ~= PREFIX or channel ~= "GUILD" or ns.Name(sender) == me or not ns.guildKey or #msg < 5 then return end
   local kind, id, seq, total = msg:sub(1, 1), msg:sub(2, 3), unb36(msg:sub(4, 4)), unb36(msg:sub(5, 5))
   if seq < 1 or total < seq then return end
   if total == 1 then return handle(kind, msg:sub(6), sender) end
@@ -123,7 +123,7 @@ f:RegisterEvent("PLAYER_LOGIN")
 f:RegisterEvent("CHAT_MSG_ADDON")
 f:SetScript("OnEvent", function(_, ev, ...)
   if ev == "PLAYER_LOGIN" then
-    me = ns.FullName(UnitName("player"))
+    me = ns.Name(UnitName("player"))
     C_ChatInfo.RegisterAddonMessagePrefix(PREFIX)
     C_Timer.NewTicker(TICK, tick)
   else

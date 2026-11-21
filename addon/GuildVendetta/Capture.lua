@@ -74,6 +74,13 @@ local function attackers(evs)
   return list
 end
 
+-- Prefer whichever source carries both names.
+local function fullName(recapName, name, second)
+  local a, b = ns.Name(name, second), ns.Name(recapName)
+  if a and a:find(" ", 1, true) then return a end
+  return b or a or "Unknown"
+end
+
 local function onDeath()
   -- World PvP only: battlegrounds, arenas and every other instance are ignored.
   if IsInInstance() or not ns.guildKey then return end
@@ -89,16 +96,16 @@ local function onDeath()
 
   local enemies, names = {}, {}
   for i, b in ipairs(list) do
-    local _, class, _, race, _, name, realm = GetPlayerInfoByGUID(b.guid)
+    local _, class, _, race, _, name, second = GetPlayerInfoByGUID(b.guid)
     enemies[i] = {
-      g = b.guid, n = ns.FullName(name or b.name, realm), c = class or "", r = race or "",
+      g = b.guid, n = fullName(b.name, name, second), c = class or "", r = race or "",
       l = ns.levels[b.guid] or -1, kb = i == 1,
     }
     names[i] = enemies[i].n
   end
   local map, x, y = where()
   local e = {
-    k = "K", t = GetServerTime(), vic = ns.FullName(UnitName("player")), vlvl = UnitLevel("player"),
+    k = "K", t = GetServerTime(), vic = ns.Name(UnitName("player")), vlvl = UnitLevel("player"),
     vclass = select(2, UnitClass("player")), zone = GetRealZoneText() or "", sub = GetSubZoneText() or "",
     map = map, x = x, y = y, en = enemies,
   }

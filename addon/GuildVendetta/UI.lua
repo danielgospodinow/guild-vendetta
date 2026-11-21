@@ -17,7 +17,7 @@ local function ago(t)
 end
 
 function ns.Remove(key)
-  local e = { k = "R", t = GetServerTime(), en = key, by = ns.FullName(UnitName("player")) }
+  local e = { k = "R", t = GetServerTime(), en = key, by = ns.Name(UnitName("player")) }
   e.id = ns.RemoveId(key, e.t)
   if ns.AddEvent(e) then ns.Broadcast(e) end
 end
@@ -109,7 +109,7 @@ end
 
 local function killText(e)
   local names = {}
-  for i, x in ipairs(e.en) do names[i] = (x.kb and "*" or "") .. Ambiguate(x.n, "none") end
+  for i, x in ipairs(e.en) do names[i] = (x.kb and "*" or "") .. x.n end
   local where = e.sub ~= "" and (e.zone .. ", " .. e.sub) or e.zone
   local coords = e.x and string.format(" (%.1f, %.1f)", e.x * 100, e.y * 100) or ""
   return string.format("killed %s (%s) in %s%s, %s ago, by %s", ns.Colored(e.vic, e.vclass), ns.Level(e.vlvl),
@@ -258,8 +258,8 @@ SlashCmdList.GUILDVENDETTA = function(arg)
     ns.RequestSync()
     ns.Print("asking online guildmates for missing entries.")
   elseif arg == "test" then
-    ns.Alert({ name = "Gankston-Example", class = "ROGUE", level = 60, count = 3,
-      kills = { { vic = UnitName("player") } } })
+    ns.Alert({ name = "Gankston Example", class = "ROGUE", level = 60, count = 3,
+      kills = { { vic = ns.Name(UnitName("player")) } } })
   elseif arg == "status" then
     local n = 0
     for _ in pairs(ns.events) do n = n + 1 end

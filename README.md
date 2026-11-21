@@ -23,10 +23,10 @@ The addon **only tracks world PvP**. Deaths in **battlegrounds, arenas, and duel
 
 | Field | Example |
 |---|---|
-| Enemy name, realm, class, race | Gankston-Mirage, Rogue, Undead |
+| Enemy's full two-part name, class, race | Gankston Doe, Rogue, Undead |
 | Enemy level at the time of the kill | `60`, or `??` when the game hides it (enemy far above your level) |
-| Killing blow / contributor | ★ Gankston, Stabbz, Mageboi |
-| Guildmate killed, and their level | Thrall (52) |
+| Killing blow / contributor | ★ Gankston Doe, Stabbz Roe |
+| Guildmate killed, and their level | Thrall Durotan (52) |
 | Where | Stranglethorn Vale, Booty Bay outskirts (x, y) |
 | When | server time of death |
 
@@ -187,7 +187,7 @@ flowchart LR
 ## Known limitations
 
 - **No combat log on WoW: Forever.** Forever blocks the combat log for addons, and trying to use it triggers *"blocked from an action only available to the Blizzard UI"*. Kills come from the **death recap** instead. The recap only covers the last few hits before death, so an enemy who hit you earlier in the fight may be missing. Whether the recap holds readable names and character IDs is being checked by the [probe (#1)](https://github.com/danielgospodinow/guild-vendetta/issues/1).
-- **Enemies are matched by character ID**, not by name. On Forever, characters can have a two-part name (for example *Todor Zhivkoff*) and the realm comes back empty, so names alone are ambiguous.
+- **Enemies are matched by character ID**, not by name. Names are shown in full everywhere, because Forever characters have two-part names (for example *Todor Zhivkoff*).
 - **Only the victim's client can record the kill**, because only it has the death recap. Guildmates without the addon won't contribute kills.
 - **Pet kills aren't credited to the owner**, because the recap doesn't say who owns a pet.
 - **Level may be `??`** when the game hides the enemy's level.

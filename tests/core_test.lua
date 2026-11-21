@@ -72,4 +72,10 @@ assert(#send == 1 and send[1] == math.floor(k.t / 86400) and more)
 send, more = ns.DiffDigest(ns.Buckets(b), ns.DecodeDigest(ns.EncodeDigest(ns.Buckets(a))))
 assert(#send == 1 and more)
 
+-- Two-part names (WoW: Forever): every API shape normalizes to "First Second"
+assert(ns.Name("Todor", "Zhivkoff") == "Todor Zhivkoff")
+assert(ns.Name("Todor-Zhivkoff") == "Todor Zhivkoff")
+assert(ns.Name("Todor Zhivkoff", "Zhivkoff") == "Todor Zhivkoff")
+assert(ns.Name("Todor", "") == "Todor" and ns.Name(nil) == nil)
+
 print("core_test: ok")
