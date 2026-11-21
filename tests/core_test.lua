@@ -1,0 +1,64 @@
+-- Run: luajit tests/core_test.lua   (from the repo root)
+local ns = {}
+assert(loadfile("addon/GuildVendetta/Core.lua"))("GuildVendetta", ns)
+
+local function kill(vic, t, enemies)
+  local e = { k = "K", t = t, vic = vic, vlvl = 50, vclass = "WARRIOR", zone = "Stranglethorn Vale",
+    sub = "Booty Bay", map = 1434, x = 0.271, y = 0.773, en = enemies }
+  e.id = ns.KillId(vic, t)
+  return e
+end
+local function remove(enemy, t) return { k = "R", t = t, en = enemy, by = "Jaina-Mirage", id = ns.RemoveId(enemy, t) } end
+local function add(log, e) log[e.id] = e end
+
+-- Encode/decode round trip
+local k = kill("Thrall-Mirage", 1763700000, {
+  { n = "Gankston-Mirage", c = "ROGUE", r = "Scourge", l = 60, kb = true },
+  { n = "Stabbz-Mirage", c = "ROGUE", r = "Orc", l = -1, kb = false },
+})
+local d = ns.Decode(ns.Encode(k))
+assert(d.id == k.id and d.vic == "Thrall-Mirage" and d.zone == "Stranglethorn Vale" and d.map == 1434)
+assert(math.abs(d.x - 0.271) < 1e-6 and #d.en == 2 and d.en[1].kb and not d.en[2].kb and d.en[2].l == -1)
+local r = ns.Decode(ns.Encode(remove("Gankston-Mirage", 1763700100)))
+assert(r.k == "R" and r.en == "Gankston-Mirage" and r.id == "R:Gankston-Mirage:1763700100")
+-- separators in strings are stripped, not injected
+local evil = kill("Thrall-Mirage", 1763700000, { { n = "A~B^C,D", c = "ROGUE", r = "Orc", l = 1, kb = true } })
+evil.zone = "Zone~with^seps,x"
+local de = ns.Decode(ns.Encode(evil))
+assert(de and de.en[1].n == "ABCD" and de.zone == "Zonewithsepsx")
+-- malformed input rejected
+for _, bad in ipairs({ "", "K~abc", "R~1763700000~~x", "K~1~a~1~b~c~d~1~0~0~n,c,r,1,1", "X~1763700000~a~b", 5 }) do
+  assert(ns.Decode(bad) == nil, tostring(bad))
+end
+
+-- View: ranking, co-contributors survive removal, removed enemy returns on a new kill
+local log = {}
+add(log, k)
+add(log, kill("Jaina-Mirage", 1763700050, { { n = "Gankston-Mirage", c = "ROGUE", r = "Scourge", l = 60, kb = true } }))
+add(log, kill("Rexxar-Mirage", 1763700060, { { n = "Healbot-Mirage", c = "PRIEST", r = "Tauren", l = -1, kb = true } }))
+local v = ns.BuildView(log)
+assert(v.rows[1].name == "Gankston-Mirage" and v.rows[1].count == 2 and v.rows[1].rank == 1)
+assert(v.rows[2].name == "Healbot-Mirage") -- 1 kill, more recent than Stabbz
+assert(v.rows[3].name == "Stabbz-Mirage" and v.rows[3].level == -1)
+assert(v.rows[1].kills[1].vic == "Jaina-Mirage") -- newest kill first
+
+add(log, remove("Gankston-Mirage", 1763700100))
+v = ns.BuildView(log)
+assert(not v.byName["Gankston-Mirage"] and v.byName["Stabbz-Mirage"].count == 1)
+
+add(log, kill("Thrall-Mirage", 1763700200, { { n = "Gankston-Mirage", c = "ROGUE", r = "Scourge", l = 60, kb = true } }))
+v = ns.BuildView(log)
+assert(v.byName["Gankston-Mirage"].count == 1) -- back, only with the post-removal kill
+
+-- Digests: identical logs match; a missing event is detected in both directions
+local a, b = {}, {}
+for id, e in pairs(log) do a[id] = e; b[id] = e end
+local send, more = ns.DiffDigest(ns.Buckets(a), ns.DecodeDigest(ns.EncodeDigest(ns.Buckets(b))))
+assert(#send == 0 and not more)
+b[k.id] = nil
+send, more = ns.DiffDigest(ns.Buckets(a), ns.DecodeDigest(ns.EncodeDigest(ns.Buckets(b))))
+assert(#send == 1 and send[1] == math.floor(k.t / 86400) and more)
+send, more = ns.DiffDigest(ns.Buckets(b), ns.DecodeDigest(ns.EncodeDigest(ns.Buckets(a))))
+assert(#send == 1 and more)
+
+print("core_test: ok")

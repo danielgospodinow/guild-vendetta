@@ -2,7 +2,7 @@
 
 A **World of Warcraft: Forever** addon that keeps a guild-shared **vendetta list**: every enemy player who has killed you or one of your guildmates in world PvP. When someone on the list comes near you, the addon flashes your screen red, shows a raid-warning style message, and plays a warning sound.
 
-> **Status: design phase.** Nothing is playable yet. Work is tracked in [GitHub Issues](https://github.com/danielgospodinow/guild-vendetta/issues). The full design is in [docs/superpowers/specs/2026-11-21-guild-vendetta-design.md](docs/superpowers/specs/2026-11-21-guild-vendetta-design.md).
+> **Status: v0.1, untested in-game.** The first build is in, but it has not run in the live client yet. Work is tracked in [GitHub Issues](https://github.com/danielgospodinow/guild-vendetta/issues). The full design is in [docs/superpowers/specs/2026-11-21-guild-vendetta-design.md](docs/superpowers/specs/2026-11-21-guild-vendetta-design.md).
 
 ## Features
 
@@ -33,20 +33,47 @@ The addon **only tracks world PvP**. Deaths in **battlegrounds, arenas, and duel
 ## The UI
 
 ```
-┌[☠]─ Guild Vendetta ─────────────────────────────[x]┐
-│ Search: [__________]   Show: [All ▾]     42 enemies │
-├─────────────────────────────────────────────────────┤
-│ #  Enemy      Kills Lvl  Last victim  Where      When │
-│ 1  Gankston R  3    60   Thrall   Stranglethorn 2h [X]│
-│ 2  Healbot  P  1    ??   Jaina    Tarren Mill   1d [X]│
-├─────────────────────────────────────────────────────┤
-│ Last sync: 1 min ago from Thrall          [Settings] │
-└─────────────────────────────────────────────────────┘
+┌[☠]─ Guild Vendetta ──────────────────────────────────[x]┐
+│      [🔍 Search      ]                       42 enemies │
+├──────────────────────────────────────────────────────────┤
+│  #  Enemy        Kills  Lvl  Last victim  Where     When  │
+│  1  + Gankston     3    60   Thrall       Stranglethorn 2h [x]│
+│        killed Thrall (52) in Stranglethorn Vale, Booty Bay │
+│        (27.1, 77.3), 2h ago, by *Gankston, Stabbz          │
+│  2  + Healbot      1    ??   Jaina        Tarren Mill  1d [x]│
+├──────────────────────────────────────────────────────────┤
+│ Last sync: 1m ago from Thrall                 [Settings] │
+└──────────────────────────────────────────────────────────┘
 ```
 
-- Open it with `/gv` or the minimap button.
-- Click a row to expand every kill by that enemy, with contributors, the killing blow and map coordinates.
-- `[X]` removes that enemy for the whole guild.
+- Open it with `/gv` or the minimap button. Escape closes it.
+- Click a row to expand every kill by that enemy, with contributors, the killing blow (`*`) and map coordinates.
+- `[x]` removes that enemy for the whole guild, after a confirmation.
+
+### Commands
+
+| Command | What it does |
+|---|---|
+| `/gv` or `/vendetta` | Open or close the window |
+| `/gv test` | Preview the alert (flash, message, sound) |
+| `/gv sync` | Ask online guildmates for anything you're missing |
+| `/gv status` | Show the guild, entry counts, and whether the game lets the addon read the combat log |
+
+## Install
+
+The addon targets the WoW: Forever client (interface `16001`).
+
+1. Clone this repo.
+2. Link the addon into your Forever AddOns folder (macOS paths shown):
+   ```bash
+   ln -s "$PWD/addon/GuildVendetta" "/Applications/World of Warcraft/_forever_/Interface/AddOns/GuildVendetta"
+   ```
+   On Windows, copy `addon/GuildVendetta` into `World of Warcraft\_forever_\Interface\AddOns\` instead.
+3. Restart the game, or run `/reload` if it is already running.
+
+### Probe addon (diagnostics)
+
+`probe/GuildVendettaProbe` is a throwaway diagnostic addon ([#1](https://github.com/danielgospodinow/guild-vendetta/issues/1)). It logs what the game lets addons read: combat log, death info, enemy names and levels, and guild messages. Link it the same way, play a bit of world PvP, then `/reload`. Its log is saved to `WTF/Account/<account>/SavedVariables/GuildVendettaProbe.lua`. `/gvp ping` tests guild messages; guildmates running the probe answer with a pong.
 
 ## How it works
 
@@ -186,10 +213,31 @@ This would add one central history, catch-up even when nobody is online, and a p
 ## Repo layout
 
 ```
-addon/GuildVendetta/   # the WoW addon (plain Lua, no libraries)
-docs/                  # design docs
-server/                # (future) Go companion app + service, option B
+addon/GuildVendetta/       # the WoW addon (plain Lua, no libraries)
+  Core.lua                 #   event log, ranked view, wire encoding, sync digests
+  Capture.lua              #   60s hit buffer + death hook -> KILL
+  Sync.lua                 #   hidden guild messages: live events + login catch-up
+  Alerts.lua               #   nameplate/target/mouseover/combat-log detection, flash/message/sound
+  UI.lua                   #   window, minimap button, settings panel, /gv
+probe/GuildVendettaProbe/  # diagnostic addon for the live client (#1)
+tests/                     # plain-Lua tests, no WoW needed
+docs/                      # design docs
+server/                    # (future) Go companion app + service, option B
 ```
+
+## Development
+
+The tests run outside the game with [LuaJIT](https://luajit.org/) (`brew install luajit`):
+
+```bash
+luajit tests/core_test.lua
+```
+
+```bash
+luajit tests/smoke_test.lua
+```
+
+`core_test` covers encoding, the ranked view, removal rules and sync digests. `smoke_test` loads the whole addon as three simulated guildmates with a stubbed WoW API and runs a death, live sync, a removal, login catch-up and an alert.
 
 ## Contributing
 
