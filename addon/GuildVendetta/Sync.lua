@@ -1,7 +1,17 @@
 -- Guild sync over hidden GUILD addon messages.
---   E <event>   one KILL/REMOVE, sent live and during catch-up
---   H <digest>  "here's what I hold" (sent at login); receivers send what we lack and reply with h
---   h <digest>  reply digest; receivers only send what the replier lacks (no further replies)
+--   E <event>       one KILL/REMOVE/VENDETTA: sent live, and during reconciliation
+--   H <digest>      "my log, per day: count + hash" — sent at login, and in answer to a heartbeat
+--   I <day id-set>  "the event fingerprints I hold for this day" — sent for days that differ
+--   B <hash>        heartbeat every ~5 min: one hash of the whole digest
+--
+-- Reconciliation (login, or a heartbeat whose hash doesn't match ours):
+--   H  -> peers compare per day: days only the peer has -> peer sends those events (E)
+--                                 days only H's sender has -> peer sends an empty id-set (I)
+--                                 days both have, differing -> peer sends its id-set (I)
+--   I  -> receiver sends the events the I's sender lacks (E), and if the I lists events the
+--         receiver lacks, answers with its own id-set (I) so the other side sends them.
+-- Guildies with identical logs give identical answers, so each answer waits a random 1-5 s and is
+-- skipped if an identical one (or the same event) appeared on the channel meanwhile.
 -- Framing: kind(1) msgid(2) seq(1) total(1) chunk(<=245), base36 counters.
 local _, ns = ...
 
@@ -9,10 +19,11 @@ local PREFIX = "GVND"
 local CHUNK = 245
 local TICK = 0.4      -- seconds between sends; the client throttles bursts anyway
 local B36 = "0123456789abcdefghijklmnopqrstuvwxyz"
-local queue = {}      -- pending messages: { kind, text } or { event, queued }
+local queue = {}      -- pending messages: { kind, text } or { event, since }
 local chunks = {}     -- chunks of the message being sent
 local partial = {}    -- sender..msgid -> { at, total, parts }
-local recent = {}     -- event id -> time seen on the channel (dedupe catch-up)
+local recent = {}     -- event id -> time seen on the channel
+local seen = {}       -- "H"/"I" answer key -> time an identical answer was seen on the channel
 local msgid = 0
 local me
 
@@ -34,8 +45,8 @@ local function tick()
     local item = table.remove(queue, 1)
     if not item then return end
     if item.event then
-      -- someone else sent it after we queued it, so every online peer already has it
-      if item.queued and (recent[item.event.id] or 0) > item.queued then return end
+      -- someone else sent it since the request came in, so every online peer already has it
+      if item.since and (recent[item.event.id] or 0) >= item.since then return end
       recent[item.event.id] = GetTime()
       split("E", ns.Encode(item.event))
     else
@@ -50,9 +61,15 @@ local function tick()
   if not throttled then table.remove(chunks, 1) end
 end
 
--- Live event: goes ahead of any catch-up traffic.
+-- Live event: goes ahead of any reconciliation traffic.
 function ns.Broadcast(e)
   table.insert(queue, 1, { event = e })
+end
+
+-- `since`: when the request arrived; any copy seen on the channel after that makes ours redundant.
+local function sendEvents(list, since)
+  table.sort(list, function(a, b) return a.t > b.t end) -- newest first
+  for _, e in ipairs(list) do queue[#queue + 1] = { event = e, since = since } end
 end
 
 local function digest()
@@ -61,34 +78,80 @@ local function digest()
   return #s > 35 * CHUNK and s:sub(-35 * CHUNK):gsub("^[^;]*;", "") or s
 end
 
+local function root() return tostring(ns.Hash(digest())) end
+
+-- Queue an answer unless an identical one was seen on the channel since `asked`.
+local function answer(kind, key, text, asked)
+  if (seen[key] or 0) >= asked then return end
+  seen[key] = GetTime()
+  queue[#queue + 1] = { kind = kind, text = text }
+end
+
+local function offerIdSet(d, asked)
+  local text = ns.EncodeIdSet(d, ns.events)
+  answer("I", "I" .. text:match("^%d+:%d+"), text, asked)
+end
+
 function ns.RequestSync()
   if ns.guildKey then queue[#queue + 1] = { kind = "H", text = digest() } end
 end
 
-local function sendDays(days)
-  local want, list = {}, {}
-  for _, d in ipairs(days) do want[d] = true end
-  for _, e in pairs(ns.events) do
-    if want[math.floor(e.t / 86400)] then list[#list + 1] = e end
-  end
-  table.sort(list, function(a, b) return a.t > b.t end) -- newest first
-  for _, e in ipairs(list) do queue[#queue + 1] = { event = e, queued = GetTime() } end
+-- Skipped while we're still sending, so a busy reconciliation isn't interrupted by its own heartbeat.
+function ns.Heartbeat()
+  if ns.guildKey and #queue == 0 and #chunks == 0 then queue[#queue + 1] = { kind = "B", text = root() } end
 end
 
+local function scheduleHeartbeat()
+  C_Timer.After(240 + math.random() * 120, function() -- jittered so guildies don't beat in lockstep
+    ns.Heartbeat()
+    scheduleHeartbeat()
+  end)
+end
+
+-- Random delay before answering, so guildies with identical logs see each other's answers and stay quiet.
+local function later(fn) C_Timer.After(1 + math.random() * 4, fn) end
+
 local function handle(kind, text, sender)
+  local asked = GetTime()
   if kind == "E" then
     local e = ns.Decode(text)
     if not e then return end
-    recent[e.id] = GetTime()
+    recent[e.id] = asked
     if ns.AddEvent(e) then
       ns.guildDB.lastSync = { t = time(), from = ns.Name(sender) } -- live news is announced in guild chat
     end
-  elseif kind == "H" or kind == "h" then
-    local send, theyHaveMore = ns.DiffDigest(ns.Buckets(ns.events), ns.DecodeDigest(text))
-    -- random delay spreads replies so guildmates can see each other's sends and skip duplicates
-    C_Timer.After(1 + math.random() * 4, function()
-      sendDays(send)
-      if kind == "H" and theyHaveMore then queue[#queue + 1] = { kind = "h", text = digest() } end
+  elseif kind == "B" then
+    local mine = root()
+    if text == mine then return end -- same log, nothing to do
+    later(function() answer("H", "H" .. mine, digest(), asked) end)
+  elseif kind == "H" then
+    seen["H" .. tostring(ns.Hash(text))] = asked
+    local mineOnly, theirsOnly, differ = ns.DiffDigest(ns.Buckets(ns.events), ns.DecodeDigest(text))
+    later(function()
+      local list = {}
+      for _, d in ipairs(mineOnly) do
+        for _, e in ipairs(ns.DayEvents(ns.events, d)) do list[#list + 1] = e end
+      end
+      sendEvents(list, asked)
+      for _, d in ipairs(differ) do offerIdSet(d, asked) end
+      for _, d in ipairs(theirsOnly) do offerIdSet(d, asked) end -- empty set: "send me all of it"
+    end)
+  elseif kind == "I" then
+    local d, h, theirs = ns.DecodeIdSet(text)
+    if not d then return end
+    seen["I" .. d .. ":" .. h] = asked
+    local missing, have, iLack = {}, {}, false
+    for _, e in ipairs(ns.DayEvents(ns.events, d)) do
+      local short = ns.ShortId(e.id)
+      have[short] = true
+      if not theirs[short] then missing[#missing + 1] = e end
+    end
+    for short in pairs(theirs) do
+      if not have[short] then iLack = true end
+    end
+    later(function()
+      sendEvents(missing, asked)
+      if iLack then offerIdSet(d, asked) end
     end)
   end
 end
@@ -111,8 +174,13 @@ local function onMessage(prefix, msg, channel, sender)
   end
 end
 
+local beating
 table.insert(ns.onGuild, function()
   C_Timer.After(8, ns.RequestSync)
+  if not beating then
+    beating = true
+    scheduleHeartbeat()
+  end
 end)
 
 local f = CreateFrame("Frame")

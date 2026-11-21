@@ -13,6 +13,8 @@ Date: 2026-11-21 · Status: approved
 > - **Announcements:** deaths and vendettas are posted in visible guild chat (toggleable).
 > - **Expiry:** kills and removals expire after 14 days; vendettas never do.
 
+> **Update 2026-11-21 (sync v2):** catch-up now goes digest → per-day id-sets (6-character fingerprints) → only the missing events. The old reply digest (`h`) is gone. A heartbeat every 4–6 minutes broadcasts one hash of the whole log; a mismatch triggers the same reconciliation. Worked examples with real messages are in [docs/sync-examples.md](../../sync-examples.md).
+
 ## Intent
 
 A World of Warcraft: Forever addon that keeps a **guild-shared vendetta list**: every enemy player who killed you or a guildmate in world PvP. When someone on the list shows up near you, the addon alerts you (screen flash + raid-warning message + sound), so the guild can avoid them, hunt them, or warn each other.

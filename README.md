@@ -210,20 +210,34 @@ Clicking `[X]` appends a `REMOVE` event and broadcasts it, the same way as a kil
 
 ### Catching up at login: sync only from online players
 
-On login or `/reload`, your addon and the guildmates **who are online right now** compare which events each side has, and **each sends the other whatever it is missing**. Newest events go first, and the rest trickle in in the background at the game's message rate, about 1,000 events in roughly 15 minutes.
+On login or `/reload`, your addon and the guildmates **who are online right now** reconcile their logs. Each side ends up with what the other had, and only the missing events are sent:
+
+1. You broadcast a **digest**: per day, "N events, hash X".
+2. Guildmates compare it day by day:
+   - **A day you don't have at all:** they send you its events directly.
+   - **A day you both have, but different:** they send that day's **id-set**, short fingerprints of every event id. You reply with yours, and each side sends exactly the events the other lacks.
+3. Guildmates with identical logs would give identical answers. Each one waits a random 1–5 seconds and skips its answer if someone else already gave it.
 
 ```mermaid
 sequenceDiagram
     participant Y as You (just logged in)
     participant P as Online guildmates
-    Y-->>P: "here's a summary of what I have"
-    P-->>Y: summaries of what they have
-    P-->>Y: events you're missing (newest first, paced)
-    Y-->>P: events they're missing
+    Y-->>P: digest: per day, count + hash
+    P-->>Y: whole days you lack (events)
+    P-->>Y: id-sets for days that differ
+    Y-->>P: your id-sets, where they lack something
+    P-->>Y: exactly the missing events
+    Y-->>P: exactly the events they lack
     Note over Y,P: everyone online ends up with the union
 ```
 
 The catch: **a sync can only come from guildmates who are online.** If a kill happened while you were offline and everyone who has it is offline too, you get it the next time you're online together with any one of them. The more of the guild runs the addon, the faster everything spreads.
+
+### Heartbeat: healing lost messages
+
+A live message can be lost, for example if you were on a loading screen when it went out. So every 4–6 minutes each addon broadcasts a **heartbeat**: one hash of its whole log. A guildmate whose hash matches stays silent. A guildmate whose hash differs answers with their digest, and the same reconciliation as a login fills the gap within minutes.
+
+**Want to see the actual messages?** [docs/sync-examples.md](docs/sync-examples.md) walks through live kills, vendettas, removals, login catch-up, heartbeats, a brand-new guildie and multi-part messages, with real captured traffic decoded field by field.
 
 ### Proximity alerts
 

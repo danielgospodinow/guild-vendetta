@@ -101,16 +101,34 @@ do
   assert(not ns.Expired({ k = "V", t = 1 }, later) and not ns.Expired({ k = "K", t = later - 10 }, later))
 end
 
--- Digests: identical logs match; a missing event is detected in both directions
+-- Digests: identical logs match; a missing event shows up as a differing day, from both sides
 local a, b = {}, {}
 for id, e in pairs(log) do a[id] = e; b[id] = e end
-local send, more = ns.DiffDigest(ns.Buckets(a), ns.DecodeDigest(ns.EncodeDigest(ns.Buckets(b))))
-assert(#send == 0 and not more)
+local function diff(x, y) return ns.DiffDigest(ns.Buckets(x), ns.DecodeDigest(ns.EncodeDigest(ns.Buckets(y)))) end
+local mo, to, df = diff(a, b)
+assert(#mo == 0 and #to == 0 and #df == 0)
 b[k.id] = nil
-send, more = ns.DiffDigest(ns.Buckets(a), ns.DecodeDigest(ns.EncodeDigest(ns.Buckets(b))))
-assert(#send == 1 and send[1] == math.floor(k.t / 86400) and more)
-send, more = ns.DiffDigest(ns.Buckets(b), ns.DecodeDigest(ns.EncodeDigest(ns.Buckets(a))))
-assert(#send == 1 and more)
+local day = math.floor(k.t / 86400)
+mo, to, df = diff(a, b)
+assert(#mo == 0 and #to == 0 and #df == 1 and df[1] == day)
+-- a day the peer doesn't have at all is "mine only"; the reverse is "theirs only"
+local older = kill("Rexxar Misha", k.t - 3 * 86400, { { n = "X", c = "ROGUE", r = "Orc", l = 1, kb = true } })
+a[older.id] = older
+mo, to = diff(a, b)
+assert(#mo == 1 and mo[1] == day - 3)
+mo, to = diff(b, a)
+assert(#to == 1 and to[1] == day - 3)
+
+-- Day id-sets: fingerprints round-trip and pinpoint exactly the missing event
+local text = ns.EncodeIdSet(day, a)
+local d2, h2, set = ns.DecodeIdSet(text)
+assert(d2 == day and h2 == ns.Buckets(a)[day].hash and set[ns.ShortId(k.id)])
+local _, _, bset = ns.DecodeIdSet(ns.EncodeIdSet(day, b))
+local missing = {}
+for _, e in ipairs(ns.DayEvents(a, day)) do if not bset[ns.ShortId(e.id)] then missing[#missing + 1] = e.id end end
+assert(#missing == 1 and missing[1] == k.id)
+assert(select(3, ns.DecodeIdSet(day .. ":0:")) and next(select(3, ns.DecodeIdSet(day .. ":0:"))) == nil) -- empty set
+assert(#ns.ShortId("K:x:1") == 6 and ns.DecodeIdSet("garbage") == nil)
 
 -- Two-part names (WoW: Forever): every API shape normalizes to "First Second"
 assert(ns.Name("Todor", "Zhivkoff") == "Todor Zhivkoff")

@@ -55,7 +55,7 @@ local function client(first, second)
   env.C_Map = { GetBestMapForUnit = function() return 1434 end,
     GetPlayerMapPosition = function() return { GetXY = function() return 0.271, 0.773 end } end }
   env.C_Timer = {
-    After = function(_, fn) timers[#timers + 1] = fn end,
+    After = function(d, fn) timers[#timers + 1] = { due = now + d, fn = fn } end,
     NewTicker = function(_, fn) env.__tick = fn end,
   }
   env.C_ChatInfo = {
@@ -96,9 +96,12 @@ local function client(first, second)
       if fr.ev[e] and fr.f.onEvent then fr.f.onEvent(fr.f, e, ...) end
     end
   end
-  function c.runTimers()
+  -- runTimers() fires every pending timer; runTimers(true) only those due by the test clock
+  function c.runTimers(dueOnly)
     local t = timers; timers = {}
-    for _, fn in ipairs(t) do fn() end
+    for _, x in ipairs(t) do
+      if dueOnly and x.due > now then timers[#timers + 1] = x else x.fn() end
+    end
   end
   return c
 end
@@ -220,6 +223,39 @@ for _ in pairs(C.ns.events) do cn = cn + 1 end
 C.runTimers()
 assert(cn == 5, "C has " .. cn .. " events")
 assert(#C.ns.view.rows == 21)
+
+-- heartbeat: B silently lost an event (e.g. a live message missed during a loading screen).
+-- Heartbeats no longer match B's; the digest / id-set exchange heals B.
+-- A and C hold identical logs, so between them they send at most one answer of each kind.
+local lostId = big.id
+B.ns.events[lostId] = nil
+B.runTimers()
+wire = {}
+A.ns.Heartbeat()
+local sent = {}
+local tapped = pump
+pump = function()
+  for _ = 1, 50 do
+    local msgs = wire; wire = {}
+    for _, m in ipairs(msgs) do
+      sent[#sent + 1] = m[4] .. ":" .. m[2]:sub(1, 1)
+      for _, c in ipairs({ A, B, C }) do
+        if c.ns.Name(m[4]) ~= c.ns.Name(c.env.UnitName("player")) then c.fire("CHAT_MSG_ADDON", m[1], m[2], m[3], m[4]) end
+      end
+    end
+    for _, c in ipairs({ A, B, C }) do c.runTimers(true); c.env.__tick() end
+    now = now + 0.5
+  end
+end
+A.env.__tick()
+pump()
+pump = tapped
+assert(B.ns.events[lostId], "heartbeat did not heal B")
+local digests = 0
+for _, k in ipairs(sent) do
+  if k == "Thrall-Durotan:H" or k == "Rexxar-Misha:H" then digests = digests + 1 end
+end
+assert(digests <= 1, "identical logs answered twice: " .. table.concat(sent, " "))
 
 -- alert on seeing a listed enemy via nameplate (after the 5 min cooldown from the targeting above)
 now = now + 301
