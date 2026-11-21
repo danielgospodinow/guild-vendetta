@@ -1,4 +1,4 @@
-# guild-vendetta
+# Guild Vendetta
 
 A **World of Warcraft: Forever** addon that keeps a guild-shared **vendetta list**: every enemy player who has killed you or one of your guildmates in world PvP. When someone on the list comes near you, the addon flashes your screen red, shows a raid-warning style message, and plays a warning sound.
 
