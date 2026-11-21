@@ -54,8 +54,9 @@ local function client(first, second)
   env.Ambiguate = function(n) return (n:gsub("%-Mirage$", "")) end
   env.C_Map = { GetBestMapForUnit = function() return 1434 end,
     GetPlayerMapPosition = function() return { GetXY = function() return 0.271, 0.773 end } end }
+  env.__timers = function(d, fn) timers[#timers + 1] = { due = now + d, fn = fn } end
   env.C_Timer = {
-    After = function(_, fn) timers[#timers + 1] = fn end,
+    After = function(d, fn) timers[#timers + 1] = { due = now + d, fn = fn } end,
     NewTicker = function(_, fn) env.__tick = fn end,
   }
   env.C_ChatInfo = {
@@ -96,9 +97,13 @@ local function client(first, second)
       if fr.ev[e] and fr.f.onEvent then fr.f.onEvent(fr.f, e, ...) end
     end
   end
-  function c.runTimers()
+  -- runTimers() fires every pending timer; runTimers(true) only those due by the test clock
+  function c.clearTimers() timers = {} end
+  function c.runTimers(dueOnly)
     local t = timers; timers = {}
-    for _, fn in ipairs(t) do fn() end
+    for _, x in ipairs(t) do
+      if dueOnly and x.due > now then timers[#timers + 1] = x else x.fn() end
+    end
   end
   return c
 end
@@ -221,6 +226,39 @@ C.runTimers()
 assert(cn == 5, "C has " .. cn .. " events")
 assert(#C.ns.view.rows == 21)
 
+-- heartbeat: B silently lost an event (e.g. a live message missed during a loading screen).
+-- Heartbeats no longer match B's; the digest / id-set exchange heals B.
+-- A and C hold identical logs, so between them they send at most one answer of each kind.
+local lostId = big.id
+B.ns.events[lostId] = nil
+B.runTimers()
+wire = {}
+A.ns.Heartbeat()
+local sent = {}
+local tapped = pump
+pump = function()
+  for _ = 1, 50 do
+    local msgs = wire; wire = {}
+    for _, m in ipairs(msgs) do
+      sent[#sent + 1] = m[4] .. ":" .. m[2]:sub(1, 1)
+      for _, c in ipairs({ A, B, C }) do
+        if c.ns.Name(m[4]) ~= c.ns.Name(c.env.UnitName("player")) then c.fire("CHAT_MSG_ADDON", m[1], m[2], m[3], m[4]) end
+      end
+    end
+    for _, c in ipairs({ A, B, C }) do c.runTimers(true); c.env.__tick() end
+    now = now + 0.5
+  end
+end
+A.env.__tick()
+pump()
+pump = tapped
+assert(B.ns.events[lostId], "heartbeat did not heal B")
+local digests = 0
+for _, k in ipairs(sent) do
+  if k == "Thrall-Durotan:H" or k == "Rexxar-Misha:H" then digests = digests + 1 end
+end
+assert(digests <= 1, "identical logs answered twice: " .. table.concat(sent, " "))
+
 -- alert on seeing a listed enemy via nameplate (after the 5 min cooldown from the targeting above)
 now = now + 301
 A.env.UnitExists = function() return true end
@@ -230,4 +268,58 @@ A.env.UnitGUID = function() return "Player-2-S" end
 A.fire("NAME_PLATE_UNIT_ADDED", "nameplate1")
 print("A alert:", A.printed[#A.printed])
 assert(A.printed[#A.printed]:find("VENDETTA"))
+-- Scale: a newcomer catching up on 20 events gets each event once, however many in-sync guildies
+-- are online, and still gets everything when the first guildies in the answer order are AFK.
+local function newcomer(peers, seed, afk)
+  math.randomseed(seed)
+  wire, now = {}, 5000
+  local all = {}
+  for i = 1, peers do all[i] = client("Peer" .. i, "Guild") end
+  for _, c in ipairs(all) do c.fire("ADDON_LOADED", "GuildVendetta"); c.fire("PLAYER_LOGIN"); c.clearTimers() end
+  for i = 1, 20 do
+    local e = { k = "K", t = 1763700000 + now - i * 12000, vic = "Victim" .. i .. " Guild", vlvl = 30, vclass = "MAGE",
+      zone = "Ashenvale", sub = "", en = { { n = "Ganker Bad", g = "Player-1-G", c = "ROGUE", r = "Orc", l = 40, kb = true } } }
+    e.id = all[1].ns.KillId(e.vic, e.t)
+    for _, c in ipairs(all) do c.ns.events[e.id] = e end
+  end
+  local function run(steps, muted, count)
+    for _ = 1, steps do
+      local msgs = wire; wire = {}
+      for _, m in ipairs(msgs) do
+        if not muted[m[4]] then
+          if count and m[2]:sub(1, 1) == "E" then count.E = count.E + 1 end
+          for _, c in ipairs(all) do
+            if c.ns.Name(m[4]) ~= c.ns.Name(c.env.UnitName("player")) then c.fire("CHAT_MSG_ADDON", m[1], m[2], m[3], m[4]) end
+          end
+        end
+      end
+      for _, c in ipairs(all) do c.runTimers(true); c.env.__tick() end
+      now = now + 0.5
+    end
+  end
+  for _, c in ipairs(all) do -- one heartbeat round so everyone knows who's online, as in-game
+    c.env.C_Timer.After = function(d, fn) if d < 200 then c.env.__timers(d, fn) end end
+    c.ns.Heartbeat(); c.env.__tick()
+  end
+  run(20, {})
+  now = now + 400
+  local new = client("Newbie", "Guild")
+  new.fire("ADDON_LOADED", "GuildVendetta"); new.fire("PLAYER_LOGIN"); new.clearTimers()
+  new.env.C_Timer.After = function(d, fn) if d < 200 then new.env.__timers(d, fn) end end
+  table.insert(all, new)
+  local muted, count = {}, { E = 0 }
+  for i = 1, afk do muted["Peer" .. i .. "-Guild"] = true end
+  new.ns.RequestSync(); new.env.__tick()
+  run(120, muted, count)
+  local got = 0
+  for _ in pairs(new.ns.events) do got = got + 1 end
+  return count.E, got
+end
+for _, case in ipairs({ { 5, 0 }, { 15, 0 }, { 10, 5 } }) do
+  for seed = 1, 3 do
+    local sent, got = newcomer(case[1], seed, case[2])
+    assert(got == 20 and sent == 20, string.format("%d peers (%d afk): %d sent, %d received", case[1], case[2], sent, got))
+  end
+end
+
 print("smoke: ok")

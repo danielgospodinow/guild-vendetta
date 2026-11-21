@@ -181,11 +181,12 @@ end
 -- Sync digests ------------------------------------------------------------------
 -- Events are bucketed by day; a bucket's summary is count + hash of its sorted ids.
 
-local function hash(s)
+function ns.Hash(s)
   local h = 5381
   for i = 1, #s do h = (h * 33 + s:byte(i)) % 4294967296 end
   return h
 end
+local hash = ns.Hash
 
 function ns.Buckets(events)
   local ids = {}
@@ -215,19 +216,57 @@ function ns.DecodeDigest(s)
   return out
 end
 
--- Days where we hold events the peer may lack, and whether the peer holds days we may lack.
+-- Compares day summaries: days only we have, days only they have, days both have but differ.
+-- Each list is newest day first.
 function ns.DiffDigest(mine, theirs)
-  local send, theyHaveMore = {}, false
+  local mineOnly, theirsOnly, differ = {}, {}, {}
   for d, b in pairs(mine) do
     local o = theirs[d]
-    if not o or o.hash ~= b.hash then send[#send + 1] = d end
+    if not o then mineOnly[#mineOnly + 1] = d elseif o.hash ~= b.hash then differ[#differ + 1] = d end
   end
-  for d, o in pairs(theirs) do
-    local b = mine[d]
-    if not b or b.hash ~= o.hash then theyHaveMore = true end
+  for d in pairs(theirs) do
+    if not mine[d] then theirsOnly[#theirsOnly + 1] = d end
   end
-  table.sort(send, function(a, b) return a > b end) -- newest days first
-  return send, theyHaveMore
+  local desc = function(a, b) return a > b end
+  table.sort(mineOnly, desc); table.sort(theirsOnly, desc); table.sort(differ, desc)
+  return mineOnly, theirsOnly, differ
+end
+
+-- Day id-sets: for a day both sides have but disagree on, each side lists short fingerprints of
+-- its event ids ("20778:4261712713:0x9k2a,1b7qzz"), so the other side sends only what's missing.
+local B36 = "0123456789abcdefghijklmnopqrstuvwxyz"
+function ns.ShortId(id)
+  local n, out = hash(id) % 2176782336, "" -- 36^6
+  for _ = 1, 6 do
+    local r = n % 36
+    out = B36:sub(r + 1, r + 1) .. out
+    n = math.floor(n / 36)
+  end
+  return out
+end
+
+function ns.DayEvents(events, d)
+  local list = {}
+  for _, e in pairs(events) do
+    if math.floor(e.t / 86400) == d then list[#list + 1] = e end
+  end
+  table.sort(list, function(a, b) return a.t > b.t end)
+  return list
+end
+
+function ns.EncodeIdSet(d, events)
+  local b = ns.Buckets(events)[d]
+  local ids = {}
+  for i, e in ipairs(ns.DayEvents(events, d)) do ids[i] = ns.ShortId(e.id) end
+  return d .. ":" .. (b and b.hash or 0) .. ":" .. table.concat(ids, ",")
+end
+
+function ns.DecodeIdSet(s)
+  local d, h, rest = s:match("^(%d+):(%d+):([%w,]*)$")
+  if not d then return end
+  local set = {}
+  for id in rest:gmatch("%w+") do set[id] = true end
+  return tonumber(d), tonumber(h), set
 end
 
 -- Runtime (WoW only) -----------------------------------------------------------
