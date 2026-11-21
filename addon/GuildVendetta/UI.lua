@@ -2,11 +2,14 @@
 local _, ns = ...
 
 local ICON = "Interface\\Icons\\Ability_Warrior_Revenge"
-local COLS = { -- header, x, width, justify
-  { "#", 6, 24, "RIGHT" }, { "Enemy", 38, 160, "LEFT" }, { "Kills", 198, 40, "CENTER" },
-  { "Lvl", 238, 34, "CENTER" }, { "Last victim", 276, 110, "LEFT" }, { "Where", 390, 150, "LEFT" },
-  { "When", 548, 44, "RIGHT" },
+local LAYOUTS = { -- per tab: header, x, width, justify
+  { { "#", 6, 24, "RIGHT" }, { "Enemy", 38, 170, "LEFT" }, { "Score", 212, 46, "CENTER" }, { "Lvl", 258, 30, "CENTER" },
+    { "Victims", 292, 150, "LEFT" }, { "Where", 446, 100, "LEFT" }, { "When", 548, 44, "RIGHT" } },
+  { { "#", 6, 24, "RIGHT" }, { "Guildie", 38, 200, "LEFT" }, { "Vendettas", 242, 70, "CENTER" },
+    { "Last taken down", 316, 220, "LEFT" }, { "When", 548, 44, "RIGHT" } },
 }
+local TABS = { "Vendetta list", "Revengers" }
+local MAXCOLS = 7
 local expanded = {}
 
 local function ago(t)
@@ -16,6 +19,9 @@ local function ago(t)
   return math.floor(d / 86400) .. "d"
 end
 
+-- "3-1": their kills on us (red) vs our vendettas on them (green)
+local function score(row) return "|cffff5050" .. row.count .. "|r-|cff50ff50" .. row.ours .. "|r" end
+
 function ns.Remove(key)
   local e = { k = "R", t = GetServerTime(), en = key, by = ns.Name(UnitName("player")) }
   e.id = ns.RemoveId(key, e.t)
@@ -23,7 +29,7 @@ function ns.Remove(key)
 end
 
 StaticPopupDialogs.GUILDVENDETTA_REMOVE = {
-  text = "Remove %s from the guild's vendetta list?\n\nThis applies to everyone in the guild.",
+  text = "Remove %s from the guild's vendetta list?\n\nThis applies to everyone in the guild, and their score starts over.",
   button1 = YES, button2 = NO, timeout = 0, whileDead = true, hideOnEscape = true,
   OnAccept = function(_, key) ns.Remove(key) end,
 }
@@ -50,13 +56,44 @@ search:SetPoint("TOPLEFT", 70, -32)
 local count = frame:CreateFontString(nil, "OVERLAY", "GameFontNormal")
 count:SetPoint("TOPRIGHT", -14, -36)
 
-for _, c in ipairs(COLS) do
-  local h = frame.Inset:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
-  h:SetPoint("TOPLEFT", c[2], -6)
-  h:SetWidth(c[3])
-  h:SetJustifyH(c[4])
-  h:SetText(c[1])
+local headers = {}
+for i = 1, MAXCOLS do
+  headers[i] = frame.Inset:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
 end
+
+local function layout(fontStrings, parent, y)
+  local cols = LAYOUTS[frame.selectedTab or 1]
+  for i, fs in ipairs(fontStrings) do
+    local c = cols[i]
+    fs:SetShown(c ~= nil)
+    if c then
+      fs:ClearAllPoints()
+      fs:SetPoint(y and "TOPLEFT" or "LEFT", parent, y and "TOPLEFT" or "LEFT", y and c[2] or c[2] - 4, y or 0)
+      fs:SetWidth(c[3])
+      fs:SetJustifyH(c[4])
+    end
+  end
+  return cols
+end
+
+for i, label in ipairs(TABS) do
+  local tab = CreateFrame("Button", "GuildVendettaFrameTab" .. i, frame, "PanelTabButtonTemplate")
+  tab:SetID(i)
+  tab:SetText(label)
+  if i == 1 then
+    tab:SetPoint("TOPLEFT", frame, "BOTTOMLEFT", 11, 2)
+  else
+    tab:SetPoint("LEFT", _G["GuildVendettaFrameTab" .. (i - 1)], "RIGHT", 3, 0)
+  end
+  tab:SetScript("OnClick", function(self)
+    PanelTemplates_SetTab(frame, self:GetID())
+    PlaySound(SOUNDKIT.IG_CHARACTER_INFO_TAB)
+    ns.RefreshWindow()
+  end)
+  PanelTemplates_TabResize(tab, 0)
+end
+PanelTemplates_SetNumTabs(frame, #TABS)
+PanelTemplates_SetTab(frame, 1)
 
 local footer = frame:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
 footer:SetPoint("BOTTOMLEFT", 12, 9)
@@ -77,11 +114,8 @@ bar:SetPoint("BOTTOMLEFT", scroll, "BOTTOMRIGHT", 6, 0)
 
 local function setupRow(button)
   button.cols = {}
-  for i, c in ipairs(COLS) do
+  for i = 1, MAXCOLS do
     local fs = button:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
-    fs:SetPoint("LEFT", c[2] - 4, 0)
-    fs:SetWidth(c[3])
-    fs:SetJustifyH(c[4])
     fs:SetWordWrap(false)
     button.cols[i] = fs
   end
@@ -116,26 +150,49 @@ local function killText(e)
     where, coords, ago(e.t), table.concat(names, ", "))
 end
 
+local function vendettaText(v)
+  return string.format("|cff50ff50taken down by %s in %s, %s ago|r", table.concat(v.by, ", "), v.zone, ago(v.t))
+end
+
+local function victims(row)
+  local names = {}
+  for i, k in ipairs(row.victims) do names[i] = ns.Colored(k.vic, k.vclass) end
+  return table.concat(names, ", ")
+end
+
 local function initRow(button, item)
   if not button.cols then setupRow(button) end
   button.item = item
-  local row = item.row
-  for _, fs in ipairs(button.cols) do fs:SetShown(row ~= nil) end
-  button.detail:SetShown(row == nil)
-  button.remove:SetShown(row ~= nil)
-  if not row then
-    button.detail:SetText(killText(item.kill))
-    return
+  local detail = item.kill or item.vendetta
+  local cols = layout(button.cols, button)
+  if detail then
+    for _, fs in ipairs(button.cols) do fs:Hide() end
   end
-  local last = row.kills[1]
+  button.detail:SetShown(detail ~= nil)
+  button.remove:SetShown(item.row ~= nil)
   local v = button.cols
-  v[1]:SetText(row.rank)
-  v[2]:SetText((expanded[row.key] and "- " or "+ ") .. ns.Colored(row.name, row.class))
-  v[3]:SetText(row.count)
-  v[4]:SetText(ns.Level(row.level))
-  v[5]:SetText(ns.Colored(last.vic, last.vclass))
-  v[6]:SetText(last.zone)
-  v[7]:SetText(ago(last.t))
+  if item.kill then
+    button.detail:SetText(killText(item.kill))
+  elseif item.vendetta then
+    button.detail:SetText(vendettaText(item.vendetta))
+  elseif item.row then
+    local row = item.row
+    v[1]:SetText(row.rank)
+    v[2]:SetText((expanded[row.key] and "- " or "+ ") .. ns.Colored(row.name, row.class))
+    v[3]:SetText(score(row))
+    v[4]:SetText(ns.Level(row.level))
+    v[5]:SetText(victims(row))
+    v[6]:SetText(row.lastVictim.zone)
+    v[7]:SetText(ago(row.last))
+  else
+    local r = item.rev
+    v[1]:SetText(r.rank)
+    v[2]:SetText(r.name)
+    v[3]:SetText(r.count)
+    v[4]:SetText(ns.Colored(r.lastEnemy, r.lastClass))
+    v[5]:SetText(ago(r.last))
+  end
+  return cols
 end
 
 local view = CreateScrollBoxListLinearView()
@@ -143,21 +200,38 @@ view:SetElementExtent(20)
 view:SetElementInitializer("Button", initRow)
 ScrollUtil.InitScrollBoxListWithScrollBar(scroll, bar, view)
 
+local function matches(name, filter) return filter == "" or name:lower():find(filter, 1, true) end
+
 function ns.RefreshWindow()
   if not frame:IsShown() then return end
+  local cols = layout(headers, frame.Inset, -6)
+  for i, h in ipairs(headers) do h:SetText(cols[i] and cols[i][1] or "") end
   local filter = search:GetText():lower()
-  local items, shown = {}, 0
-  for _, row in ipairs(ns.view.rows) do
-    if filter == "" or row.name:lower():find(filter, 1, true) then
-      shown = shown + 1
-      items[#items + 1] = { row = row }
-      if expanded[row.key] then
-        for _, e in ipairs(row.kills) do items[#items + 1] = { kill = e } end
+  local items = {}
+  if (frame.selectedTab or 1) == 1 then
+    for _, row in ipairs(ns.view.rows) do
+      if matches(row.name, filter) then
+        items[#items + 1] = { row = row }
+        if expanded[row.key] then
+          -- every kill and every vendetta on this enemy, newest first
+          local lines = {}
+          for _, k in ipairs(row.kills) do lines[#lines + 1] = { t = k.t, kill = k } end
+          for _, d in ipairs(row.vendettas) do lines[#lines + 1] = { t = d.t, vendetta = d } end
+          table.sort(lines, function(a, b) return a.t > b.t end)
+          for _, l in ipairs(lines) do items[#items + 1] = l end
+        end
       end
     end
+    local n = #ns.view.rows
+    count:SetText(n .. (n == 1 and " enemy" or " enemies"))
+  else
+    for _, r in ipairs(ns.view.revengers) do
+      if matches(r.name, filter) then items[#items + 1] = { rev = r } end
+    end
+    local n = #ns.view.revengers
+    count:SetText(n .. (n == 1 and " revenger" or " revengers"))
   end
   scroll:SetDataProvider(CreateDataProvider(items), ScrollBoxConstants.RetainScrollPosition)
-  count:SetText(shown .. (shown == 1 and " enemy" or " enemies"))
 
   local h = ns.health
   if h.secret > 0 or h.recap == "no recap events" then
@@ -231,6 +305,8 @@ local function registerSettings()
   Settings.CreateCheckbox(cat, add("flash", "Screen flash"), "Flash the screen red when a listed enemy is nearby.")
   Settings.CreateCheckbox(cat, add("message", "Warning message"), "Show a raid-warning style message.")
   Settings.CreateCheckbox(cat, add("sound", "Warning sound"), "Play the raid warning sound.")
+  Settings.CreateCheckbox(cat, add("announce", "Announce in guild chat"),
+    "Post guildie deaths and successful vendettas in guild chat (visible to the whole guild).")
   local opts = Settings.CreateSliderOptions(1, 30, 1)
   opts:SetLabelFormatter(MinimalSliderWithSteppersMixin.Label.Right)
   Settings.CreateSlider(cat, add("cooldown", "Alert cooldown (minutes)"), opts,
@@ -258,7 +334,7 @@ SlashCmdList.GUILDVENDETTA = function(arg)
     ns.RequestSync()
     ns.Print("asking online guildmates for missing entries.")
   elseif arg == "test" then
-    ns.Alert({ name = "Gankston Example", class = "ROGUE", level = 60, count = 3,
+    ns.Alert({ name = "Gankston Example", class = "ROGUE", level = 60, count = 3, ours = 1,
       kills = { { vic = ns.Name(UnitName("player")) } } })
   elseif arg == "status" then
     local n = 0

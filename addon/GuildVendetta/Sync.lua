@@ -81,10 +81,7 @@ local function handle(kind, text, sender)
     if not e then return end
     recent[e.id] = GetTime()
     if ns.AddEvent(e) then
-      ns.guildDB.lastSync = { t = time(), from = ns.Name(sender) }
-      if e.k == "K" and GetServerTime() - e.t < 120 then
-        ns.Print("%s was killed by %s in %s.", e.vic, e.en[1].n, e.zone)
-      end
+      ns.guildDB.lastSync = { t = time(), from = ns.Name(sender) } -- live news is announced in guild chat
     end
   elseif kind == "H" or kind == "h" then
     local send, theyHaveMore = ns.DiffDigest(ns.Buckets(ns.events), ns.DecodeDigest(text))

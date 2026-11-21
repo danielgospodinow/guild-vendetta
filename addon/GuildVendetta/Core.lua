@@ -1,10 +1,12 @@
--- Event log (KILL / REMOVE), derived vendetta view, wire encoding, sync digests.
+-- Event log (KILL / REMOVE / VENDETTA), derived views, wire encoding, sync digests.
 -- The pure functions here run outside WoW too (see tests/core_test.lua).
 local _, ns = ...
 
-ns.DEFAULTS = { flash = true, message = true, sound = true, cooldown = 5, minimap = true, minimapAngle = 200 }
+ns.DEFAULTS = { flash = true, message = true, sound = true, announce = true, cooldown = 5, minimap = true, minimapAngle = 200 }
+ns.EXPIRY = 14 * 86400   -- kills (and removals) older than this drop off the list
+ns.CLUSTER = 60          -- vendetta credits for one enemy within this many seconds are one kill
 ns.events = {}      -- current guild's log: id -> event
-ns.view = { rows = {}, byKey = {} }
+ns.view = { rows = {}, byKey = {}, byName = {}, revengers = {} }
 ns.listeners = {}   -- called after the view is rebuilt
 ns.onLoaded = {}    -- called once settings are loaded
 ns.onGuild = {}     -- called when the guild log is ready (login or guild change)
@@ -12,6 +14,7 @@ ns.onGuild = {}     -- called when the guild log is ready (login or guild change
 -- Encoding -----------------------------------------------------------------
 -- KILL:   K~t~victim~vlvl~vclass~zone~sub~map~x~y~enemy^enemy...   enemy = name,class,race,level,kb,guid
 -- REMOVE: R~t~enemyKey~by
+-- VENDETTA: V~t~enemyKey~enemyName~enemyClass~by~zone   (a guildie helped kill a listed enemy)
 -- Enemies are identified by GUID (names are ambiguous on Forever); name is the fallback key.
 -- Ids are derived from content, never sent, so a peer can't forge a mismatching id.
 
@@ -28,10 +31,16 @@ end
 function ns.KillId(victim, t) return "K:" .. victim .. ":" .. t end
 function ns.EnemyKey(x) return (x.g and x.g ~= "") and x.g or x.n end
 function ns.RemoveId(enemy, t) return "R:" .. enemy .. ":" .. t end
+function ns.VendettaId(enemy, by, t) return "V:" .. enemy .. ":" .. by .. ":" .. t end
+
+-- Vendettas are kept forever (they feed the revengers leaderboard).
+function ns.Expired(e, now) return e.k ~= "V" and e.t < now - ns.EXPIRY end
 
 function ns.Encode(e)
   if e.k == "R" then
     return table.concat({ "R", e.t, clean(e.en, 80), clean(e.by) }, "~")
+  elseif e.k == "V" then
+    return table.concat({ "V", e.t, clean(e.en, 80), clean(e.n), clean(e.c, 16), clean(e.by), clean(e.zone) }, "~")
   end
   local en = {}
   for i, x in ipairs(e.en) do
@@ -57,6 +66,9 @@ function ns.Decode(s)
   if f[1] == "R" and #f == 4 and f[3] ~= "" then
     return { k = "R", t = t, en = f[3], by = f[4], id = ns.RemoveId(f[3], t) }
   end
+  if f[1] == "V" and #f == 7 and f[3] ~= "" and f[6] ~= "" then
+    return { k = "V", t = t, en = f[3], n = f[4], c = f[5], by = f[6], zone = f[7], id = ns.VendettaId(f[3], f[6], t) }
+  end
   if f[1] ~= "K" or #f ~= 11 or f[3] == "" then return end
   local e = {
     k = "K", t = t, vic = f[3], vlvl = num(f[4], -1, 200) or -1, vclass = f[5], zone = f[6], sub = f[7],
@@ -73,24 +85,29 @@ function ns.Decode(s)
 end
 
 -- View -----------------------------------------------------------------------
--- An enemy is listed if they have a KILL newer than their latest REMOVE.
--- Rows are ranked by kill count, ties by most recent kill.
+-- An enemy is listed if they have a KILL in the last 14 days that is newer than their latest REMOVE.
+-- Score: theirs = those kills; ours = vendetta kills on them since the latest REMOVE, where credits
+-- from several guildies within CLUSTER seconds count as one kill. Rows are ranked by theirs.
+-- Revengers: every vendetta credit ever, per guildie (not reset by removals or expiry).
 
-function ns.BuildView(events)
-  local removed = {}
+local function newest(a, b) return a.t > b.t end
+
+function ns.BuildView(events, now)
+  local cutoff = now - ns.EXPIRY
+  local removed, strikes, revByName, revengers = {}, {}, {}, {}
   for _, e in pairs(events) do
     if e.k == "R" and e.t > (removed[e.en] or 0) then removed[e.en] = e.t end
   end
-  local byKey, rows = {}, {}
+  local byKey, byName, rows = {}, {}, {}
   for _, e in pairs(events) do
-    if e.k == "K" then
+    if e.k == "K" and e.t > cutoff then
       for _, x in ipairs(e.en) do
         local key = ns.EnemyKey(x)
         if e.t > (removed[key] or 0) then
           local row = byKey[key]
           if not row then
-            row = { key = key, name = x.n, kills = {}, last = 0, level = -1, levelT = 0 }
-            byKey[key] = row
+            row = { key = key, name = x.n, kills = {}, vendettas = {}, last = 0, level = -1, levelT = 0, ours = 0 }
+            byKey[key], byName[x.n] = row, row
             rows[#rows + 1] = row
           end
           row.kills[#row.kills + 1] = e
@@ -99,11 +116,52 @@ function ns.BuildView(events)
           if x.l ~= -1 and e.t >= row.levelT then row.level, row.levelT = x.l, e.t end
         end
       end
+    elseif e.k == "V" then
+      strikes[e.en] = strikes[e.en] or {}
+      table.insert(strikes[e.en], e)
+      local r = revByName[e.by]
+      if not r then
+        r = { name = e.by, count = 0, last = 0 }
+        revByName[e.by] = r
+        revengers[#revengers + 1] = r
+      end
+      r.count = r.count + 1
+      if e.t > r.last then r.last, r.lastEnemy, r.lastClass = e.t, e.n, e.c end
+    end
+  end
+  for key, list in pairs(strikes) do
+    local row = byKey[key]
+    if row then
+      table.sort(list, function(a, b) return a.t < b.t end)
+      local cluster
+      for _, v in ipairs(list) do
+        if v.t > (removed[key] or 0) then
+          if cluster and v.t - cluster.t <= ns.CLUSTER then
+            if not cluster.seen[v.by] then
+              cluster.seen[v.by] = true
+              table.insert(cluster.by, v.by)
+            end
+          else
+            cluster = { t = v.t, zone = v.zone, by = { v.by }, seen = { [v.by] = true } }
+            table.insert(row.vendettas, cluster)
+          end
+        end
+      end
+      row.ours = #row.vendettas
+      table.sort(row.vendettas, newest)
     end
   end
   for _, row in ipairs(rows) do
-    row.count = #row.kills
-    table.sort(row.kills, function(a, b) return a.t > b.t end)
+    row.count = #row.kills -- theirs
+    table.sort(row.kills, newest)
+    row.victims, row.lastVictim = {}, row.kills[1]
+    local seen = {}
+    for _, k in ipairs(row.kills) do
+      if not seen[k.vic] then
+        seen[k.vic] = true
+        table.insert(row.victims, k)
+      end
+    end
   end
   table.sort(rows, function(a, b)
     if a.count ~= b.count then return a.count > b.count end
@@ -111,7 +169,13 @@ function ns.BuildView(events)
     return a.name < b.name
   end)
   for i, row in ipairs(rows) do row.rank = i end
-  return { rows = rows, byKey = byKey }
+  table.sort(revengers, function(a, b)
+    if a.count ~= b.count then return a.count > b.count end
+    if a.last ~= b.last then return a.last > b.last end
+    return a.name < b.name
+  end)
+  for i, r in ipairs(revengers) do r.rank = i end
+  return { rows = rows, byKey = byKey, byName = byName, revengers = revengers }
 end
 
 -- Sync digests ------------------------------------------------------------------
@@ -174,14 +238,14 @@ function ns.Changed()
   pending = true
   C_Timer.After(0.3, function()
     pending = false
-    ns.view = ns.BuildView(ns.events)
+    ns.view = ns.BuildView(ns.events, GetServerTime())
     for _, fn in ipairs(ns.listeners) do fn() end
   end)
 end
 
 -- Stores an event; returns true if it was new.
 function ns.AddEvent(e)
-  if not e or not e.id or ns.events[e.id] then return false end
+  if not e or not e.id or ns.events[e.id] or ns.Expired(e, GetServerTime()) then return false end
   ns.events[e.id] = e
   ns.Changed()
   return true
@@ -212,6 +276,10 @@ function ns.LoadGuild()
   GuildVendettaDB.guilds[key] = GuildVendettaDB.guilds[key] or { events = {} }
   ns.guildDB = GuildVendettaDB.guilds[key]
   ns.events = ns.guildDB.events
+  local now = GetServerTime()
+  for id, e in pairs(ns.events) do
+    if ns.Expired(e, now) then ns.events[id] = nil end
+  end
   ns.Changed()
   for _, fn in ipairs(ns.onGuild) do fn() end
   return true
