@@ -10,8 +10,11 @@
 --                                 days both have, differing -> peer sends its id-set (I)
 --   I  -> receiver sends the events the I's sender lacks (E), and if the I lists events the
 --         receiver lacks, answers with its own id-set (I) so the other side sends them.
--- Guildies with identical logs give identical answers, so each answer waits a random 1-5 s and is
--- skipped if an identical one (or the same event) appeared on the channel meanwhile.
+-- Guildies with identical logs would give identical answers, so they take turns: for each request,
+-- every addon sorts the guildies it has heard from (heartbeats keep this list fresh) by a hash of
+-- name + request, and answers after 0.5 s + 2 s per place in that order. The first answers; the rest
+-- see its answer (or the same events) arrive during their wait and stay quiet. If the first is AFK,
+-- the second's turn comes 2 s later.
 -- Framing: kind(1) msgid(2) seq(1) total(1) chunk(<=245), base36 counters.
 local _, ns = ...
 
@@ -24,6 +27,8 @@ local chunks = {}     -- chunks of the message being sent
 local partial = {}    -- sender..msgid -> { at, total, parts }
 local recent = {}     -- event id -> time seen on the channel
 local seen = {}       -- "H"/"I" answer key -> time an identical answer was seen on the channel
+local peers = {}      -- guildie name -> time we last heard from their addon
+local loginAt = 0
 local msgid = 0
 local me
 
@@ -108,11 +113,31 @@ local function scheduleHeartbeat()
   end)
 end
 
--- Random delay before answering, so guildies with identical logs see each other's answers and stay quiet.
-local function later(fn) C_Timer.After(1 + math.random() * 4, fn) end
+-- Our turn to answer `request` from `requester`, as a delay. Everyone computes the same order.
+local function turn(requester, request)
+  local now, list = GetTime(), { me }
+  for name, at in pairs(peers) do
+    if now - at < 600 and name ~= requester then list[#list + 1] = name end
+  end
+  local h = {}
+  for _, name in ipairs(list) do h[name] = ns.Hash(name .. "|" .. requester .. "|" .. request) end
+  table.sort(list, function(a, b)
+    if h[a] ~= h[b] then return h[a] < h[b] end
+    return a < b
+  end)
+  local place = 0
+  for i, name in ipairs(list) do
+    if name == me then place = i - 1 end
+  end
+  -- just logged in: we may not have heard every guildie's heartbeat yet, so let the others go first
+  local fresh = now - loginAt < 360 and 4 or 0
+  return 0.5 + place * 2 + fresh + math.random() * 0.3
+end
+
+local function later(requester, request, fn) C_Timer.After(turn(requester, request), fn) end
 
 local function handle(kind, text, sender)
-  local asked = GetTime()
+  local asked, requester, request = GetTime(), ns.Name(sender), kind .. ns.Hash(text)
   if kind == "E" then
     local e = ns.Decode(text)
     if not e then return end
@@ -123,11 +148,11 @@ local function handle(kind, text, sender)
   elseif kind == "B" then
     local mine = root()
     if text == mine then return end -- same log, nothing to do
-    later(function() answer("H", "H" .. mine, digest(), asked) end)
+    later(requester, request, function() answer("H", "H" .. mine, digest(), asked) end)
   elseif kind == "H" then
     seen["H" .. tostring(ns.Hash(text))] = asked
     local mineOnly, theirsOnly, differ = ns.DiffDigest(ns.Buckets(ns.events), ns.DecodeDigest(text))
-    later(function()
+    later(requester, request, function()
       local list = {}
       for _, d in ipairs(mineOnly) do
         for _, e in ipairs(ns.DayEvents(ns.events, d)) do list[#list + 1] = e end
@@ -149,7 +174,7 @@ local function handle(kind, text, sender)
     for short in pairs(theirs) do
       if not have[short] then iLack = true end
     end
-    later(function()
+    later(requester, request, function()
       sendEvents(missing, asked)
       if iLack then offerIdSet(d, asked) end
     end)
@@ -158,6 +183,7 @@ end
 
 local function onMessage(prefix, msg, channel, sender)
   if prefix ~= PREFIX or channel ~= "GUILD" or ns.Name(sender) == me or not ns.guildKey or #msg < 5 then return end
+  peers[ns.Name(sender)] = GetTime()
   local kind, id, seq, total = msg:sub(1, 1), msg:sub(2, 3), unb36(msg:sub(4, 4)), unb36(msg:sub(5, 5))
   if seq < 1 or total < seq then return end
   if total == 1 then return handle(kind, msg:sub(6), sender) end
@@ -189,6 +215,7 @@ f:RegisterEvent("CHAT_MSG_ADDON")
 f:SetScript("OnEvent", function(_, ev, ...)
   if ev == "PLAYER_LOGIN" then
     me = ns.Name(UnitName("player"))
+    loginAt = GetTime()
     C_ChatInfo.RegisterAddonMessagePrefix(PREFIX)
     C_Timer.NewTicker(TICK, tick)
   else

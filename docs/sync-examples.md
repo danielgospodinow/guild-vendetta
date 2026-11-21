@@ -77,33 +77,33 @@ sequenceDiagram
     participant Ja as Jaina (4)
     Th->>To: H  "day 20778: 3 events, hash 2395705750"
     Th->>Ja: (same broadcast)
-    Note over To,Ja: day 20778 differs (4 vs 3).<br/>Both would answer identically; Todor's random wait<br/>ends first, Jaina sees his answer and stays quiet.
-    To->>Th: I  "day 20778: my 4 fingerprints"
+    Note over To,Ja: day 20778 differs (4 vs 3). Both would answer<br/>identically, so they take turns: for this request<br/>the order is Jaina, then Todor. Jaina answers at 0.5 s;<br/>Todor's turn (2.5 s) comes after her answer arrived.
+    Ja->>Th: I  "day 20778: my 4 fingerprints"
     Note over Th: I'm missing lnjrx8.<br/>Answer with my own list so they can tell.
-    Th->>To: I  "day 20778: my 3 fingerprints"
-    To->>Th: E  the missing KILL
+    Th->>Ja: I  "day 20778: my 3 fingerprints"
+    Ja->>Th: E  the missing KILL
 ```
 
 ```
 Thrall Durotan    [digest]      H031120778:3:2395705750
-Todor Zhivkoff    [day id-set]  I041120778:1544699368:lnjrx8,1hj0ek,gi3g5b,lmywsf
+Jaina Proudmoore  [day id-set]  I041120778:1544699368:lnjrx8,1hj0ek,gi3g5b,lmywsf
 Thrall Durotan    [day id-set]  I041120778:2395705750:1hj0ek,gi3g5b,lmywsf
-Todor Zhivkoff    [event]       E0511K~1795293302~Todor Zhivkoff~32~PALADIN~Alterac Mountains~The Headland~1416~0.399~0.920~Yasashii Hinghtclaw,DRUID,NightElf,37,1,Player-6842-00C4852A
+Jaina Proudmoore  [event]       E0511K~1795293302~Todor Zhivkoff~32~PALADIN~Alterac Mountains~The Headland~1416~0.399~0.920~Yasashii Hinghtclaw,DRUID,NightElf,37,1,Player-6842-00C4852A
 ```
 
 Step by step:
 
 1. **`H…20778:3:2395705750`:** Thrall's digest: "on day 20778 I have 3 events, hash 2395705750".
-2. **Todor and Jaina compare** with their own day 20778 (4 events, a different hash). The day differs, but the digest can't say *which* events, so one of them sends the day's fingerprints: `lnjrx8,1hj0ek,gi3g5b,lmywsf`.
+2. **Todor and Jaina compare** with their own day 20778 (4 events, a different hash). The day differs, but the digest can't say *which* events, so the day's fingerprints are needed: `lnjrx8,1hj0ek,gi3g5b,lmywsf`. Both have the same answer, and the turn order for this request puts Jaina first, so she sends it.
 3. **Thrall compares** those 4 fingerprints with his own 3. He is missing `lnjrx8`. He doesn't know which event that is, so he answers with his own list.
-4. **Todor sees** that Thrall's list lacks `lnjrx8` (his newest KILL) and sends exactly that one event.
+4. **Jaina sees** that Thrall's list lacks `lnjrx8` (Todor's newest KILL) and sends exactly that one event.
 
-**Four messages, and each event is sent once.** Jaina stayed silent the whole time, because each answer she would have given had already appeared on the channel.
+**Four messages, and each event is sent once.** Todor stayed silent the whole time. Each of his turns came 2 s after Jaina's, and by then her answer was already on the channel.
 
 ## 5. Heartbeat: everyone in sync
 
 ```
-Jaina Proudmoore  [heartbeat]  B03111001900908
+Jaina Proudmoore  [heartbeat]  B06111001900908
 ```
 
 `1001900908` is a hash of Jaina's whole digest. Todor and Thrall compute the same number from their own logs, so nobody answers. This is what you'll see almost all the time: **one tiny message every 4–6 minutes per guildie.**
@@ -113,16 +113,16 @@ Jaina Proudmoore  [heartbeat]  B03111001900908
 Jaina missed Thrall's removal (say she was on a loading screen when it went out). Nobody notices until the next heartbeat:
 
 ```
-Todor Zhivkoff    [heartbeat]   B06111001900908
-Jaina Proudmoore  [digest]      H041120778:3:3155731750
-Todor Zhivkoff    [day id-set]  I071120778:1544699368:lnjrx8,1hj0ek,gi3g5b,lmywsf
-Jaina Proudmoore  [day id-set]  I051120778:3155731750:lnjrx8,gi3g5b,lmywsf
-Thrall Durotan    [event]       E0511R~1795289699~Player-6948-05F3FBB6~Thrall Durotan
+Todor Zhivkoff    [heartbeat]   B05111001900908
+Jaina Proudmoore  [digest]      H071120778:3:3155731750
+Thrall Durotan    [day id-set]  I051120778:1544699368:lnjrx8,1hj0ek,gi3g5b,lmywsf
+Jaina Proudmoore  [day id-set]  I081120778:3155731750:lnjrx8,gi3g5b,lmywsf
+Thrall Durotan    [event]       E0611R~1795289699~Player-6948-05F3FBB6~Thrall Durotan
 ```
 
 1. Todor's heartbeat hash (`1001900908`) doesn't match Jaina's, so Jaina answers with her digest. Thrall's log matches Todor's, so he doesn't answer.
 2. From there it's the same exchange as a login: the day 20778 id-sets show Jaina lacks `1hj0ek`, the REMOVE.
-3. Thrall's random wait happened to end first, so he sends it. Todor sees it go by and skips his copy.
+3. For this request, the turn order puts Thrall before Todor, so Thrall sends the id-set and then the REMOVE. Todor stays quiet.
 
 Without heartbeats, Jaina would stay out of date until her next login or `/reload`.
 
@@ -132,29 +132,49 @@ Rexxar just installed the addon and has an empty log. His digest is empty:
 
 ```
 Rexxar Misha      [digest]  H0111
-Todor Zhivkoff    [event]   E0811K~1795293302~Todor Zhivkoff~...      (newest first)
-Todor Zhivkoff    [event]   E0911R~1795289699~Player-6948-05F3FBB6~Thrall Durotan
-Todor Zhivkoff    [event]   E0a11V~1795289633~Player-6842-00C4852A~Yasashii Hinghtclaw~...
-Todor Zhivkoff    [event]   E0b11K~1795289030~Todor Zhivkoff~...
+Thrall Durotan    [event]   E0711K~1795293302~Todor Zhivkoff~...      (newest first)
+Thrall Durotan    [event]   E0811R~1795289699~Player-6948-05F3FBB6~Thrall Durotan
+Thrall Durotan    [event]   E0911V~1795289633~Player-6842-00C4852A~Yasashii Hinghtclaw~...
+Thrall Durotan    [event]   E0a11K~1795289030~Todor Zhivkoff~...
 ```
 
-When the other side has **no events at all** for a day, there's nothing to compare, so the events are sent straight away with no id-sets. Only Todor sends. Jaina and Thrall skip each event as they see Todor's copy go by. Rexxar now holds all **4 events**.
+When the other side has **no events at all** for a day, there's nothing to compare, so the events are sent straight away with no id-sets. Only Thrall sends, because his turn is first. Todor and Jaina skip each event as they see Thrall's copy go by. Rexxar now holds all **4 events**.
 
 ## 8. A message too big for one packet
 
 WoW caps an addon message at 255 bytes, so a KILL with 12 attackers is split into 4 parts:
 
 ```
-Jaina Proudmoore  [event]  E0614K~1795296968~Jaina Proudmoore~30~MAGE~Hillsbrad Foothills~Tarren Mill~1424~0.560~0.190~Raider1 Alliance,WARRIOR,Human,60,1,Player-6948-01000001^…^Raider3 Alliance,WARRIOR,Human,60,0,Player-6
-Jaina Proudmoore  [event]  E06244948-01000003^Raider4 Alliance,…
-Jaina Proudmoore  [event]  E0634er8 Alliance,…
-Jaina Proudmoore  [event]  E0644ARRIOR,Human,60,0,Player-6948-01000012
+Jaina Proudmoore  [event]  E0914K~1795296978~Jaina Proudmoore~30~MAGE~Hillsbrad Foothills~Tarren Mill~1424~0.560~0.190~Raider1 Alliance,WARRIOR,Human,60,1,Player-6948-01000001^…^Raider3 Alliance,WARRIOR,Human,60,0,Player-6
+Jaina Proudmoore  [event]  E09244948-01000003^Raider4 Alliance,…
+Jaina Proudmoore  [event]  E0934er8 Alliance,…
+Jaina Proudmoore  [event]  E0944ARRIOR,Human,60,0,Player-6948-01000012
 ```
 
-Header `E 06 1 4`, `E 06 2 4`, `E 06 3 4`, `E 06 4 4`: message `06`, parts 1–4 of 4. Receivers put the parts back together by sender and message id, then decode the event. Parts that never complete are dropped after 60 seconds.
+Header `E 09 1 4`, `E 09 2 4`, `E 09 3 4`, `E 09 4 4`: message `09`, parts 1–4 of 4. Receivers put the parts back together by sender and message id, then decode the event. Parts that never complete are dropped after 60 seconds.
 
-## Rules that keep it quiet
+## Who answers: taking turns
 
-- **Identical logs give identical answers,** so every answer waits a random 1–5 s. It's skipped if the same answer (same digest, same day id-set, or the same event) appeared on the channel since the request came in.
+Everyone with the same log would give the same answer, so for each request the guildies **take turns**:
+
+- Every addon keeps a list of guildies it has heard from in the last 10 minutes. Heartbeats every 4–6 minutes keep it fresh.
+- For each request, every addon sorts that list by a hash of *name + requester + request*. They all get the same order, and the order changes from request to request, so the work spreads around the guild.
+- Place 0 answers after 0.5 s, place 1 after 2.5 s, place 2 after 4.5 s, and so on.
+- When a guildie's turn comes, it skips anything that already appeared on the channel since the request arrived. Normally that's everything, so only place 0 sends.
+- If place 0 is AFK or lagging, place 1 covers it 2 s later.
+- A guildie who logged in less than 6 minutes ago may not have heard everyone's heartbeat yet, so it waits an extra 4 s to avoid taking someone else's turn.
+
+Measured in the simulator, with a newcomer catching up on 20 events (20 runs per size):
+
+| Online guildies | Random waits (old) | Turn order |
+|---|---|---|
+| 5 | avg 27, worst 60 | **20** every time |
+| 10 | avg 33, worst 60 | **20** every time |
+| 20 | avg 63, worst 140 | **20** every time |
+| 40 | — | **20** every time |
+| 20, with half AFK | — | **20**, and the newcomer got all 20 every time |
+
+## Other rules
+
 - **Heartbeats aren't sent while there's still traffic to send,** so they don't pile onto an ongoing catch-up.
-- **Known gap:** an event split into several parts takes about 1.6 s to fully arrive. If two guildies start sending the same one within that window, it gets sent twice. That's harmless (merging is by id) and rare.
+- **Known gap:** an event split into several parts takes about 1.6 s to fully arrive. If a guildie's turn comes during that window, it may send the same event again. That's harmless (merging is by id) and rare.

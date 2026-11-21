@@ -216,7 +216,7 @@ On login or `/reload`, your addon and the guildmates **who are online right now*
 2. Guildmates compare it day by day:
    - **A day you don't have at all:** they send you its events directly.
    - **A day you both have, but different:** they send that day's **id-set**, short fingerprints of every event id. You reply with yours, and each side sends exactly the events the other lacks.
-3. Guildmates with identical logs would give identical answers. Each one waits a random 1–5 seconds and skips its answer if someone else already gave it.
+3. Guildmates with identical logs would give identical answers, so they **take turns**. For each request, every addon puts the guildies it has heard from in the same order. The first answers after half a second, and the rest wait 2 seconds per place. Normally only the first one sends anything, however many guildmates are online. If the first is AFK, the next one covers it 2 seconds later.
 
 ```mermaid
 sequenceDiagram
