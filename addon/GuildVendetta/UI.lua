@@ -4,8 +4,8 @@ local _, ns = ...
 local ICON = "Interface\\Icons\\Ability_Warrior_Revenge"
 local COLS = { -- header, x, width, justify
   { "#", 6, 24, "RIGHT" }, { "Enemy", 38, 160, "LEFT" }, { "Kills", 198, 40, "CENTER" },
-  { "Lvl", 238, 34, "CENTER" }, { "Last victim", 276, 110, "LEFT" }, { "Where", 390, 140, "LEFT" },
-  { "When", 534, 40, "RIGHT" },
+  { "Lvl", 238, 34, "CENTER" }, { "Last victim", 276, 110, "LEFT" }, { "Where", 390, 150, "LEFT" },
+  { "When", 548, 44, "RIGHT" },
 }
 local expanded = {}
 
@@ -31,7 +31,7 @@ StaticPopupDialogs.GUILDVENDETTA_REMOVE = {
 -- Window -----------------------------------------------------------------------
 
 local frame = CreateFrame("Frame", "GuildVendettaFrame", UIParent, "ButtonFrameTemplate")
-frame:SetSize(620, 460)
+frame:SetSize(660, 460)
 frame:SetPoint("CENTER")
 frame:SetMovable(true)
 frame:EnableMouse(true)
