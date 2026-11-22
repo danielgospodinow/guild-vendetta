@@ -41,14 +41,13 @@ The addon is for the **WoW: Forever** client (interface `16001`). Its folder mus
 | macOS | `/Applications/World of Warcraft/_forever_/Interface/AddOns` |
 | Windows | `C:\Program Files (x86)\World of Warcraft\_forever_\Interface\AddOns` |
 
-### Option 1: download the ZIP (players)
+### Option 1: download a release (players)
 
-1. On the [repo page](https://github.com/danielgospodinow/guild-vendetta), click **Code → Download ZIP**.
-2. Unzip it. Inside, open `guild-vendetta-main/addon/` and copy the **`GuildVendetta`** folder into your AddOns folder.
-   - Copy only that folder, not the whole `guild-vendetta-main`. WoW only loads an addon whose folder name matches its `.toc` file (`GuildVendetta/GuildVendetta.toc`).
+1. Open the [latest release](https://github.com/danielgospodinow/guild-vendetta/releases/latest) and download `GuildVendetta-<version>.zip`.
+2. Unzip it into your AddOns folder. The zip holds just the `GuildVendetta` folder, so you end up with `AddOns/GuildVendetta/GuildVendetta.toc`.
 3. Restart the game, or `/reload` if it's running.
 
-**To update:** delete the old `GuildVendetta` folder and repeat. Your list is kept, because it's stored in the `WTF` folder, not in the addon folder.
+**To update:** delete the old `GuildVendetta` folder and unzip the new release. Your list is kept, because it's stored in the `WTF` folder, not in the addon folder.
 
 ### Option 2: symlink a clone (developers)
 
@@ -364,6 +363,9 @@ addon/GuildVendetta/       # the WoW addon (plain Lua, no libraries)
 probe/GuildVendettaProbe/  # diagnostic addon for the live client (#1)
 tests/                     # plain-Lua tests, no WoW needed
 docs/                      # design docs
+scripts/                   # release build and VERSION check, used by CI
+.github/workflows/         # CI (tests, VERSION check) and releases
+VERSION                    # the current version, MAJOR.MINOR.PATCH
 ```
 
 ## Development
@@ -385,6 +387,19 @@ luajit tests/smoke_test.lua
 ```
 
 `core_test` covers encoding, the ranked view, removal rules and sync digests. `smoke_test` loads the whole addon as three simulated guildmates with a stubbed WoW API and runs a death, live sync, a removal, login catch-up and an alert.
+
+### Versions and releases
+
+The version lives in one place, the `VERSION` file (`MAJOR.MINOR.PATCH`). The addon's `.toc` says `## Version: dev`; release builds replace it with the real version.
+
+- **Pull requests:** CI runs both tests and checks `VERSION`. A PR that changes anything under `addon/` must raise `VERSION` above `main`'s. Docs-only PRs don't need to.
+- **Releases:** every push to `main` runs the release workflow. If `VERSION` hasn't been released yet, it runs the tests, builds `GuildVendetta-<version>.zip` (only the addon folder) and publishes it as release `v<version>`, with notes generated from the merged PRs. If that version already exists, it does nothing.
+
+To build the zip locally:
+
+```bash
+scripts/build-release.sh
+```
 
 ## Contributing
 
