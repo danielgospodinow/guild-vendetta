@@ -203,10 +203,10 @@ A.env.UnitIsDead = function() return false end
 A.env.UnitExists = function() return false end
 A.env.__tick()
 
--- catch-up: a new client C logs in with an empty log and gets everything via H/E
+-- catch-up: a new client C logs in with an empty log; its login heartbeat starts the exchange (B/H/I/E)
 local C = client("Rexxar", "Misha")
 C.fire("ADDON_LOADED", "GuildVendetta"); C.fire("PLAYER_LOGIN"); C.runTimers()
-C.env.__tick() -- sends H
+C.env.__tick() -- sends its login heartbeat
 local function pump()
   for _ = 1, 50 do
     local msgs = wire; wire = {}
@@ -309,7 +309,7 @@ local function newcomer(peers, seed, afk)
   table.insert(all, new)
   local muted, count = {}, { E = 0 }
   for i = 1, afk do muted["Peer" .. i .. "-Guild"] = true end
-  new.ns.RequestSync(); new.env.__tick()
+  new.ns.Heartbeat(); new.env.__tick() -- the login heartbeat
   run(120, muted, count)
   local got = 0
   for _ in pairs(new.ns.events) do got = got + 1 end

@@ -179,7 +179,12 @@ function ns.BuildView(events, now)
 end
 
 -- Sync digests ------------------------------------------------------------------
--- Events are bucketed by day; a bucket's summary is count + hash of its sorted ids.
+-- Events are grouped into units: one per day for the last RECENT_DAYS days, and one per 30-day
+-- block before that (old days only hold vendettas, which never expire, so the digest stays small
+-- however old the guild is). A unit is a string: "20778" (a day) or "m692" (a 30-day block).
+-- A unit's summary is count + hash of its sorted event ids.
+
+ns.RECENT_DAYS = 15
 
 function ns.Hash(s)
   local h = 5381
@@ -188,52 +193,69 @@ function ns.Hash(s)
 end
 local hash = ns.Hash
 
-function ns.Buckets(events)
+function ns.UnitOf(t, now)
+  local d = math.floor(t / 86400)
+  if d >= math.floor(now / 86400) - ns.RECENT_DAYS then return tostring(d) end
+  return "m" .. math.floor(d / 30)
+end
+
+-- First day a unit covers; orders units by age.
+function ns.UnitStart(u)
+  local m = u:match("^m(%d+)$")
+  return m and tonumber(m) * 30 or tonumber(u)
+end
+local function newestFirst(a, b) return ns.UnitStart(a) > ns.UnitStart(b) end
+
+function ns.Buckets(events, now)
   local ids = {}
   for id, e in pairs(events) do
-    local d = math.floor(e.t / 86400)
-    ids[d] = ids[d] or {}
-    table.insert(ids[d], id)
+    local u = ns.UnitOf(e.t, now)
+    ids[u] = ids[u] or {}
+    table.insert(ids[u], id)
   end
   local out = {}
-  for d, list in pairs(ids) do
+  for u, list in pairs(ids) do
     table.sort(list)
-    out[d] = { count = #list, hash = hash(table.concat(list, ";")) }
+    out[u] = { count = #list, hash = hash(table.concat(list, ";")) }
   end
   return out
 end
 
+-- Oldest unit first, so a digest cut to fit keeps its newest end.
 function ns.EncodeDigest(buckets)
+  local units = {}
+  for u in pairs(buckets) do units[#units + 1] = u end
+  table.sort(units, function(a, b) return newestFirst(b, a) end)
   local parts = {}
-  for d, b in pairs(buckets) do parts[#parts + 1] = d .. ":" .. b.count .. ":" .. b.hash end
-  table.sort(parts)
+  for i, u in ipairs(units) do parts[i] = u .. ":" .. buckets[u].count .. ":" .. buckets[u].hash end
   return table.concat(parts, ";")
 end
 
 function ns.DecodeDigest(s)
   local out = {}
-  for d, c, h in s:gmatch("(%d+):(%d+):(%d+)") do out[tonumber(d)] = { count = tonumber(c), hash = tonumber(h) } end
+  for u, c, h in s:gmatch("(m?%d+):(%d+):(%d+)") do out[u] = { count = tonumber(c), hash = tonumber(h) } end
   return out
 end
 
--- Compares day summaries: days only we have, days only they have, days both have but differ.
--- Each list is newest day first.
+-- Compares unit summaries: units only we have, units only they have, units both have but differ.
+-- Each list is newest first.
 function ns.DiffDigest(mine, theirs)
   local mineOnly, theirsOnly, differ = {}, {}, {}
-  for d, b in pairs(mine) do
-    local o = theirs[d]
-    if not o then mineOnly[#mineOnly + 1] = d elseif o.hash ~= b.hash then differ[#differ + 1] = d end
+  for u, b in pairs(mine) do
+    local o = theirs[u]
+    if not o then mineOnly[#mineOnly + 1] = u elseif o.hash ~= b.hash then differ[#differ + 1] = u end
   end
-  for d in pairs(theirs) do
-    if not mine[d] then theirsOnly[#theirsOnly + 1] = d end
+  for u in pairs(theirs) do
+    if not mine[u] then theirsOnly[#theirsOnly + 1] = u end
   end
-  local desc = function(a, b) return a > b end
-  table.sort(mineOnly, desc); table.sort(theirsOnly, desc); table.sort(differ, desc)
+  table.sort(mineOnly, newestFirst); table.sort(theirsOnly, newestFirst); table.sort(differ, newestFirst)
   return mineOnly, theirsOnly, differ
 end
 
--- Day id-sets: for a day both sides have but disagree on, each side lists short fingerprints of
--- its event ids ("20778:4261712713:0x9k2a,1b7qzz"), so the other side sends only what's missing.
+-- Id-sets: for units both sides have but disagree on, each side lists a short fingerprint of every
+-- event id in the unit, so the other side sends only what's missing. One message carries the
+-- id-sets of all such units: "20778:1544699368:lnjrx8,1hj0ek|m692:0:" (an empty set means
+-- "send me everything in this unit").
 local B36 = "0123456789abcdefghijklmnopqrstuvwxyz"
 function ns.ShortId(id)
   local n, out = hash(id) % 2176782336, "" -- 36^6
@@ -245,28 +267,36 @@ function ns.ShortId(id)
   return out
 end
 
-function ns.DayEvents(events, d)
+function ns.UnitEvents(events, u, now)
   local list = {}
   for _, e in pairs(events) do
-    if math.floor(e.t / 86400) == d then list[#list + 1] = e end
+    if ns.UnitOf(e.t, now) == u then list[#list + 1] = e end
   end
   table.sort(list, function(a, b) return a.t > b.t end)
   return list
 end
 
-function ns.EncodeIdSet(d, events)
-  local b = ns.Buckets(events)[d]
-  local ids = {}
-  for i, e in ipairs(ns.DayEvents(events, d)) do ids[i] = ns.ShortId(e.id) end
-  return d .. ":" .. (b and b.hash or 0) .. ":" .. table.concat(ids, ",")
+function ns.EncodeIdSets(units, events, now)
+  local buckets, out = ns.Buckets(events, now), {}
+  for i, u in ipairs(units) do
+    local ids = {}
+    for j, e in ipairs(ns.UnitEvents(events, u, now)) do ids[j] = ns.ShortId(e.id) end
+    out[i] = u .. ":" .. (buckets[u] and buckets[u].hash or 0) .. ":" .. table.concat(ids, ",")
+  end
+  return table.concat(out, "|")
 end
 
-function ns.DecodeIdSet(s)
-  local d, h, rest = s:match("^(%d+):(%d+):([%w,]*)$")
-  if not d then return end
-  local set = {}
-  for id in rest:gmatch("%w+") do set[id] = true end
-  return tonumber(d), tonumber(h), set
+-- Returns a list of { unit, hash, set }, or nil if any part is malformed.
+function ns.DecodeIdSets(s)
+  local out = {}
+  for part in (s .. "|"):gmatch("([^|]*)|") do
+    local u, h, rest = part:match("^(m?%d+):(%d+):([%w,]*)$")
+    if not u then return end
+    local set = {}
+    for id in rest:gmatch("%w+") do set[id] = true end
+    out[#out + 1] = { unit = u, hash = tonumber(h), set = set }
+  end
+  if #out > 0 then return out end
 end
 
 -- Runtime (WoW only) -----------------------------------------------------------
