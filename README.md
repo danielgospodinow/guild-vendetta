@@ -2,8 +2,6 @@
 
 A **World of Warcraft: Forever** addon that keeps a guild-shared **vendetta list**: every enemy player who has killed you or one of your guildmates in world PvP. When someone on the list comes near you, the addon flashes your screen red, shows a raid-warning style message, and plays a warning sound.
 
-> **Status: v0.2.** Kill tracking is tested in the live client. Vendetta detection and sync between two players haven't been tested in-game yet. Work is tracked in [GitHub Issues](https://github.com/danielgospodinow/guild-vendetta/issues). The full design is in [docs/superpowers/specs/2026-11-21-guild-vendetta-design.md](docs/superpowers/specs/2026-11-21-guild-vendetta-design.md).
-
 ## Features
 
 - **Automatic kill tracking.** When a guildmate dies to enemy players, the kill is recorded the moment it happens.
