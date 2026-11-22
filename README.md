@@ -379,20 +379,6 @@ Each addon sends at most one message part every 0.4 s, and live events jump the 
 
 There is nothing to host. Each guild's list lives in its members' game clients and is shared only over that guild's channel. Nothing is ever sent outside the guild.
 
-## Roadmap: optional server (option B)
-
-A later, optional add-on to the above, tracked in [#9](https://github.com/danielgospodinow/guild-vendetta/issues/9):
-
-```mermaid
-flowchart LR
-    W[WoW client + addon] <--> SV[(SavedVariables file)]
-    SV <--> CA["Companion app (Go)<br/>on each member's PC"]
-    CA <-- HTTPS --> API["Go service<br/>(Render, or a Mac mini via cloudflared)"]
-    API <--> DB[(Postgres on Neon)]
-```
-
-This would add one central history, catch-up even when nobody is online, and a possible web view of the list. The cost is that every member installs a companion app, and server data reaches the game only on `/reload` or login. Each guild could run its own instance.
-
 ## Repo layout
 
 ```
@@ -405,7 +391,6 @@ addon/GuildVendetta/       # the WoW addon (plain Lua, no libraries)
 probe/GuildVendettaProbe/  # diagnostic addon for the live client (#1)
 tests/                     # plain-Lua tests, no WoW needed
 docs/                      # design docs
-server/                    # (future) Go companion app + service, option B
 ```
 
 ## Development

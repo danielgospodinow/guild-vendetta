@@ -204,4 +204,6 @@ Blizzard-native templates (portrait frame, title bar, inset, scroll list, red cl
 
 ## Later: option B
 
+> **Dropped 2026-11-22** ([#9](https://github.com/danielgospodinow/guild-vendetta/issues/9) closed): the in-game sync protocol keeps every guildmate's log in sync over the guild channel, so a server, database and companion app aren't needed.
+
 A Go companion app reads/writes the addon's SavedVariables file and syncs with a Go HTTP service backed by Postgres (Render + Neon, or self-hosted on a Mac mini via cloudflared). Each guild can run its own instance. Tracked as a GitHub issue.
