@@ -73,7 +73,16 @@ This links the AddOns folder to a git clone, so `git pull` (or your own edits) s
 
 At character select, open **AddOns** and make sure *Guild Vendetta* is ticked. If it's listed as out of date, tick **Load out of date AddOns**.
 
-## Commands
+## Using the addon
+
+Open the window with `/gv` or the minimap button. It has two tabs:
+
+- **Vendetta list:** every enemy on the list, ranked by how many guildmates they've killed. Each row shows the enemy's score (their kills on us vs. our kills on them, for example `3-1`), their last known level, every guildmate they've killed, and where and when they last struck. Click a row to see that enemy's full history: each kill with its place, coordinates and attackers, and each time a guildmate took them down. The `[x]` on a row removes that enemy for the whole guild, after a confirmation.
+- **Revengers:** guildmates ranked by how many listed enemies they've helped take down.
+
+The footer shows when the list last synced and from whom. **Settings** (also under *Options → AddOns*) turns the screen flash, warning message, sound and guild chat announcements on or off, and sets how often the same enemy can trigger an alert.
+
+### Commands
 
 | Command | What it does |
 |---|---|
