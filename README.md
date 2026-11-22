@@ -73,41 +73,7 @@ This links the AddOns folder to a git clone, so `git pull` (or your own edits) s
 
 At character select, open **AddOns** and make sure *Guild Vendetta* is ticked. If it's listed as out of date, tick **Load out of date AddOns**.
 
-## The UI
-
-```
-┌[☠]─ Guild Vendetta ─────────────────────────────────────────────────[x]┐
-│      [🔍 Search      ]                                       42 enemies │
-├─────────────────────────────────────────────────────────────────────────┤
-│  #  Enemy                 Score  Lvl  Victims                 Where   When │
-│  1  - Yasashii Hinghtclaw  3-1    37  Todor Zhivkoff, Jaina…  Alterac  2h [x]│
-│        taken down by Thrall Durotan, Jaina Proudmoore in Arathi, 1h ago   │
-│        killed Todor Zhivkoff (32) in Alterac Mountains, The Headland      │
-│        (39.9, 92.0), 2h ago, by *Yasashii Hinghtclaw, Muffe Kung          │
-│        killed Jaina Proudmoore (30) in Hillsbrad Foothills, 1d ago, by …  │
-│        killed Todor Zhivkoff (31) in Arathi Highlands, 3d ago, by …       │
-│  2  + Muffe Kung           1-0    32  Todor Zhivkoff          Alterac  2h [x]│
-├─────────────────────────────────────────────────────────────────────────┤
-│ Last sync: 1m ago from Thrall Durotan                        [Settings] │
-└─────────────────────────────────────────────────────────────────────────┘
- [Vendetta list] [Revengers]
-```
-
-**Revengers tab:**
-
-```
-│  #  Guildie            Vendettas  Last taken down          When │
-│  1  Thrall Durotan         7      Yasashii Hinghtclaw       1h  │
-│  2  Jaina Proudmoore       3      Muffe Kung                2d  │
-```
-
-- Open it with `/gv` or the minimap button. Escape closes it.
-- **Score** is their kills (red) vs. our vendettas on them (green).
-- **Victims** lists every guildie the enemy has killed.
-- **Click a row** to expand that enemy's full history, newest first: every kill (victim, place, coordinates, contributors, killing blow `*`) and every vendetta (who took them down, where).
-- **`[x]`** removes that enemy for the whole guild, after a confirmation. Their score starts over if they come back.
-
-### Commands
+## Commands
 
 | Command | What it does |
 |---|---|
