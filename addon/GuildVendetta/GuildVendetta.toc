@@ -2,7 +2,7 @@
 ## Title: Guild Vendetta
 ## Notes: Guild-shared list of enemy players who killed you or your guildmates in world PvP, with proximity alerts.
 ## Author: Daniel Gospodinow
-## Version: 0.1.0
+## Version: dev
 ## IconTexture: Interface\Icons\Ability_Warrior_Revenge
 ## SavedVariables: GuildVendettaDB
 

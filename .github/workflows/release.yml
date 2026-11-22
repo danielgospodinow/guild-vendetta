@@ -1,0 +1,44 @@
+name: Release
+
+on:
+  push:
+    branches: [main]
+
+permissions:
+  contents: write
+
+concurrency:
+  group: release
+  cancel-in-progress: false
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Skip if this VERSION is already released
+        id: version
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          v=$(tr -d '[:space:]' < VERSION)
+          echo "version=$v" >> "$GITHUB_OUTPUT"
+          if gh release view "v$v" >/dev/null 2>&1; then
+            echo "v$v is already released; nothing to do."
+            echo "new=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "new=true" >> "$GITHUB_OUTPUT"
+          fi
+      - if: steps.version.outputs.new == 'true'
+        run: sudo apt-get update -q && sudo apt-get install -yq luajit
+      - if: steps.version.outputs.new == 'true'
+        run: luajit tests/core_test.lua && luajit tests/smoke_test.lua
+      - if: steps.version.outputs.new == 'true'
+        run: scripts/build-release.sh
+      - if: steps.version.outputs.new == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          V: ${{ steps.version.outputs.version }}
+        run: |
+          gh release create "v$V" "dist/GuildVendetta-$V.zip" \
+            --title "Guild Vendetta $V" --target "$GITHUB_SHA" --generate-notes
