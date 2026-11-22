@@ -2,8 +2,6 @@
 
 A **World of Warcraft: Forever** addon that keeps a guild-shared **vendetta list**: every enemy player who has killed you or one of your guildmates in world PvP. When someone on the list comes near you, the addon flashes your screen red, shows a raid-warning style message, and plays a warning sound.
 
-> **Status: v0.2.** Kill tracking is tested in the live client. Vendetta detection and sync between two players haven't been tested in-game yet. Work is tracked in [GitHub Issues](https://github.com/danielgospodinow/guild-vendetta/issues). The full design is in [docs/superpowers/specs/2026-11-21-guild-vendetta-design.md](docs/superpowers/specs/2026-11-21-guild-vendetta-design.md).
-
 ## Features
 
 - **Automatic kill tracking.** When a guildmate dies to enemy players, the kill is recorded the moment it happens.
@@ -75,39 +73,14 @@ This links the AddOns folder to a git clone, so `git pull` (or your own edits) s
 
 At character select, open **AddOns** and make sure *Guild Vendetta* is ticked. If it's listed as out of date, tick **Load out of date AddOns**.
 
-## The UI
+## Using the addon
 
-```
-┌[☠]─ Guild Vendetta ─────────────────────────────────────────────────[x]┐
-│      [🔍 Search      ]                                       42 enemies │
-├─────────────────────────────────────────────────────────────────────────┤
-│  #  Enemy                 Score  Lvl  Victims                 Where   When │
-│  1  - Yasashii Hinghtclaw  3-1    37  Todor Zhivkoff, Jaina…  Alterac  2h [x]│
-│        taken down by Thrall Durotan, Jaina Proudmoore in Arathi, 1h ago   │
-│        killed Todor Zhivkoff (32) in Alterac Mountains, The Headland      │
-│        (39.9, 92.0), 2h ago, by *Yasashii Hinghtclaw, Muffe Kung          │
-│        killed Jaina Proudmoore (30) in Hillsbrad Foothills, 1d ago, by …  │
-│        killed Todor Zhivkoff (31) in Arathi Highlands, 3d ago, by …       │
-│  2  + Muffe Kung           1-0    32  Todor Zhivkoff          Alterac  2h [x]│
-├─────────────────────────────────────────────────────────────────────────┤
-│ Last sync: 1m ago from Thrall Durotan                        [Settings] │
-└─────────────────────────────────────────────────────────────────────────┘
- [Vendetta list] [Revengers]
-```
+Open the window with `/gv` or the minimap button. It has two tabs:
 
-**Revengers tab:**
+- **Vendetta list:** every enemy on the list, ranked by how many guildmates they've killed. Each row shows the enemy's score (their kills on us vs. our kills on them, for example `3-1`), their last known level, every guildmate they've killed, and where and when they last struck. Click a row to see that enemy's full history: each kill with its place, coordinates and attackers, and each time a guildmate took them down. The `[x]` on a row removes that enemy for the whole guild, after a confirmation.
+- **Revengers:** guildmates ranked by how many listed enemies they've helped take down.
 
-```
-│  #  Guildie            Vendettas  Last taken down          When │
-│  1  Thrall Durotan         7      Yasashii Hinghtclaw       1h  │
-│  2  Jaina Proudmoore       3      Muffe Kung                2d  │
-```
-
-- Open it with `/gv` or the minimap button. Escape closes it.
-- **Score** is their kills (red) vs. our vendettas on them (green).
-- **Victims** lists every guildie the enemy has killed.
-- **Click a row** to expand that enemy's full history, newest first: every kill (victim, place, coordinates, contributors, killing blow `*`) and every vendetta (who took them down, where).
-- **`[x]`** removes that enemy for the whole guild, after a confirmation. Their score starts over if they come back.
+The footer shows when the list last synced and from whom. **Settings** (also under *Options → AddOns*) turns the screen flash, warning message, sound and guild chat announcements on or off, and sets how often the same enemy can trigger an alert.
 
 ### Commands
 
