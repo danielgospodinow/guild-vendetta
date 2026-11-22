@@ -1,15 +1,18 @@
 -- Guild sync over hidden GUILD addon messages.
---   E <event>       one KILL/REMOVE/VENDETTA: sent live, and during reconciliation
---   H <digest>      "my log, per day: count + hash" — sent at login, and in answer to a heartbeat
---   I <day id-set>  "the event fingerprints I hold for this day" — sent for days that differ
---   B <hash>        heartbeat every ~5 min: one hash of the whole digest
+--   E <event>     one KILL/REMOVE/VENDETTA: sent live, and during reconciliation
+--   B <hash>      heartbeat: one hash of our whole digest. Sent 8 s after login or /reload, then
+--                 every 4-6 min. Guildies with the same hash stay silent.
+--   H <digest>    "my log, per unit: count + hash" (a unit is a recent day or an older 30-day
+--                 block). Sent in answer to a heartbeat whose hash differs from ours.
+--   I <id-sets>   "the event fingerprints I hold for these units", for units that differ.
 --
--- Reconciliation (login, or a heartbeat whose hash doesn't match ours):
---   H  -> peers compare per day: days only the peer has -> peer sends those events (E)
---                                 days only H's sender has -> peer sends an empty id-set (I)
---                                 days both have, differing -> peer sends its id-set (I)
+-- Reconciliation, after a heartbeat mismatch:
+--   B  -> anyone whose hash differs answers with H.
+--   H  -> receiver compares unit by unit: units only it has -> sends those events (E);
+--         units the H's sender has that it lacks or disagrees on -> sends its id-sets (I),
+--         all in one message (empty set = "send me all of it").
 --   I  -> receiver sends the events the I's sender lacks (E), and if the I lists events the
---         receiver lacks, answers with its own id-set (I) so the other side sends them.
+--         receiver lacks, answers with its own id-sets for those units (I).
 -- Guildies with identical logs would give identical answers, so they take turns: for each request,
 -- every addon sorts the guildies it has heard from (heartbeats keep this list fresh) by a hash of
 -- name + request, and answers after 0.5 s + 2 s per place in that order. The first answers; the rest
@@ -78,8 +81,8 @@ local function sendEvents(list, since)
 end
 
 local function digest()
-  -- ponytail: digest capped to the newest days that fit 35 chunks (~400 days of activity)
-  local s = ns.EncodeDigest(ns.Buckets(ns.events))
+  -- ponytail: capped to the newest units that fit 35 chunks; with 30-day blocks that's decades
+  local s = ns.EncodeDigest(ns.Buckets(ns.events, GetServerTime()))
   return #s > 35 * CHUNK and s:sub(-35 * CHUNK):gsub("^[^;]*;", "") or s
 end
 
@@ -92,10 +95,13 @@ local function answer(kind, key, text, asked)
   queue[#queue + 1] = { kind = kind, text = text }
 end
 
-local function offerIdSet(d, asked)
-  local text = ns.EncodeIdSet(d, ns.events)
-  answer("I", "I" .. text:match("^%d+:%d+"), text, asked)
+local function offerIdSets(units, asked)
+  if #units == 0 then return end
+  local text = ns.EncodeIdSets(units, ns.events, GetServerTime())
+  answer("I", "I" .. ns.Hash(text), text, asked)
 end
+
+local function unitEvents(u) return ns.UnitEvents(ns.events, u, GetServerTime()) end
 
 function ns.RequestSync()
   if ns.guildKey then queue[#queue + 1] = { kind = "H", text = digest() } end
@@ -151,32 +157,36 @@ local function handle(kind, text, sender)
     later(requester, request, function() answer("H", "H" .. mine, digest(), asked) end)
   elseif kind == "H" then
     seen["H" .. tostring(ns.Hash(text))] = asked
-    local mineOnly, theirsOnly, differ = ns.DiffDigest(ns.Buckets(ns.events), ns.DecodeDigest(text))
+    local mineOnly, theirsOnly, differ = ns.DiffDigest(ns.Buckets(ns.events, GetServerTime()), ns.DecodeDigest(text))
     later(requester, request, function()
       local list = {}
-      for _, d in ipairs(mineOnly) do
-        for _, e in ipairs(ns.DayEvents(ns.events, d)) do list[#list + 1] = e end
+      for _, u in ipairs(mineOnly) do
+        for _, e in ipairs(unitEvents(u)) do list[#list + 1] = e end
       end
       sendEvents(list, asked)
-      for _, d in ipairs(differ) do offerIdSet(d, asked) end
-      for _, d in ipairs(theirsOnly) do offerIdSet(d, asked) end -- empty set: "send me all of it"
+      for _, u in ipairs(theirsOnly) do differ[#differ + 1] = u end -- we list nothing: "send me all of it"
+      offerIdSets(differ, asked)
     end)
   elseif kind == "I" then
-    local d, h, theirs = ns.DecodeIdSet(text)
-    if not d then return end
-    seen["I" .. d .. ":" .. h] = asked
-    local missing, have, iLack = {}, {}, false
-    for _, e in ipairs(ns.DayEvents(ns.events, d)) do
-      local short = ns.ShortId(e.id)
-      have[short] = true
-      if not theirs[short] then missing[#missing + 1] = e end
-    end
-    for short in pairs(theirs) do
-      if not have[short] then iLack = true end
+    local sets = ns.DecodeIdSets(text)
+    if not sets then return end
+    seen["I" .. ns.Hash(text)] = asked
+    local missing, lacking = {}, {}
+    for _, s in ipairs(sets) do
+      local have, iLack = {}, false
+      for _, e in ipairs(unitEvents(s.unit)) do
+        local short = ns.ShortId(e.id)
+        have[short] = true
+        if not s.set[short] then missing[#missing + 1] = e end
+      end
+      for short in pairs(s.set) do
+        if not have[short] then iLack = true end
+      end
+      if iLack then lacking[#lacking + 1] = s.unit end
     end
     later(requester, request, function()
       sendEvents(missing, asked)
-      if iLack then offerIdSet(d, asked) end
+      offerIdSets(lacking, asked)
     end)
   end
 end
@@ -202,7 +212,7 @@ end
 
 local beating
 table.insert(ns.onGuild, function()
-  C_Timer.After(8, ns.RequestSync)
+  C_Timer.After(8, ns.Heartbeat) -- login and /reload: same check as every heartbeat
   if not beating then
     beating = true
     scheduleHeartbeat()

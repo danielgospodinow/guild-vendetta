@@ -15,6 +15,8 @@ Date: 2026-11-21 · Status: approved
 
 > **Update 2026-11-21 (sync v2):** catch-up now goes digest → per-day id-sets (6-character fingerprints) → only the missing events. The old reply digest (`h`) is gone. A heartbeat every 4–6 minutes broadcasts one hash of the whole log; a mismatch triggers the same reconciliation. Worked examples with real messages are in [docs/sync-examples.md](../../sync-examples.md).
 
+> **Update 2026-11-22 (sync v3):** login and `/reload` send a heartbeat instead of a digest, so a reload with nothing new costs one message. Digests group events into units: each of the last 15 days, plus 30-day blocks for older events (only vendettas live that long), which keeps them about two messages long. All id-sets of one answer travel in one `I` message (`unit:hash:ids|unit:hash:ids`).
+
 ## Intent
 
 A World of Warcraft: Forever addon that keeps a **guild-shared vendetta list**: every enemy player who killed you or a guildmate in world PvP. When someone on the list shows up near you, the addon alerts you (screen flash + raid-warning message + sound), so the guild can avoid them, hunt them, or warn each other.

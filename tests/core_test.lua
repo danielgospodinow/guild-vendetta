@@ -101,34 +101,66 @@ do
   assert(not ns.Expired({ k = "V", t = 1 }, later) and not ns.Expired({ k = "K", t = later - 10 }, later))
 end
 
--- Digests: identical logs match; a missing event shows up as a differing day, from both sides
+-- Digests: identical logs match; a missing event shows up as a differing unit, from both sides
 local a, b = {}, {}
 for id, e in pairs(log) do a[id] = e; b[id] = e end
-local function diff(x, y) return ns.DiffDigest(ns.Buckets(x), ns.DecodeDigest(ns.EncodeDigest(ns.Buckets(y)))) end
+local function diff(x, y) return ns.DiffDigest(ns.Buckets(x, NOW), ns.DecodeDigest(ns.EncodeDigest(ns.Buckets(y, NOW)))) end
 local mo, to, df = diff(a, b)
 assert(#mo == 0 and #to == 0 and #df == 0)
 b[k.id] = nil
-local day = math.floor(k.t / 86400)
+local day = tostring(math.floor(k.t / 86400))
 mo, to, df = diff(a, b)
 assert(#mo == 0 and #to == 0 and #df == 1 and df[1] == day)
--- a day the peer doesn't have at all is "mine only"; the reverse is "theirs only"
+-- a unit the peer doesn't have at all is "mine only"; the reverse is "theirs only"
 local older = kill("Rexxar Misha", k.t - 3 * 86400, { { n = "X", c = "ROGUE", r = "Orc", l = 1, kb = true } })
 a[older.id] = older
+local olderUnit = tostring(math.floor(older.t / 86400))
 mo, to = diff(a, b)
-assert(#mo == 1 and mo[1] == day - 3)
+assert(#mo == 1 and mo[1] == olderUnit and #to == 0)
 mo, to = diff(b, a)
-assert(#to == 1 and to[1] == day - 3)
+assert(#mo == 0 and #to == 1 and to[1] == olderUnit)
 
--- Day id-sets: fingerprints round-trip and pinpoint exactly the missing event
-local text = ns.EncodeIdSet(day, a)
-local d2, h2, set = ns.DecodeIdSet(text)
-assert(d2 == day and h2 == ns.Buckets(a)[day].hash and set[ns.ShortId(k.id)])
-local _, _, bset = ns.DecodeIdSet(ns.EncodeIdSet(day, b))
+-- Units: recent days stay days; older events (vendettas, which never expire) fold into 30-day blocks
+assert(ns.UnitOf(NOW, NOW) == tostring(math.floor(NOW / 86400)))
+assert(ns.UnitOf(NOW - 15 * 86400, NOW) == tostring(math.floor(NOW / 86400) - 15))
+local old = NOW - 100 * 86400
+assert(ns.UnitOf(old, NOW) == "m" .. math.floor(math.floor(old / 86400) / 30))
+assert(ns.UnitStart("m692") == 20760 and ns.UnitStart("20778") == 20778)
+do -- a year of daily vendettas: the digest stays small
+  local L = {}
+  for i = 1, 365 do
+    local e = vend("Player-2-G", "Gankston Doe", "Thrall Durotan", NOW - i * 86400)
+    L[e.id] = e
+  end
+  local dg = ns.EncodeDigest(ns.Buckets(L, NOW))
+  local units = select(2, dg:gsub(";", ";")) + 1
+  assert(units <= 16 + 14, "units: " .. units) -- 15 recent days + ~13 blocks
+  assert(#dg < 3 * 245, "digest bytes: " .. #dg)
+  assert(dg:match(";(%d+):1:%d+$")) -- newest unit (a recent day) last, so a cut keeps it
+  -- a peer missing one old vendetta disagrees on exactly one block
+  local L2 = {}
+  for id, e in pairs(L) do L2[id] = e end
+  local gone = vend("Player-2-G", "Gankston Doe", "Thrall Durotan", NOW - 200 * 86400)
+  L2[gone.id] = nil
+  local _, _, dif = ns.DiffDigest(ns.Buckets(L, NOW), ns.DecodeDigest(ns.EncodeDigest(ns.Buckets(L2, NOW))))
+  assert(#dif == 1 and dif[1] == ns.UnitOf(gone.t, NOW))
+  -- the id-sets for that block pinpoint the one missing vendetta
+  local sets = ns.DecodeIdSets(ns.EncodeIdSets(dif, L2, NOW))
+  local miss = {}
+  for _, e in ipairs(ns.UnitEvents(L, sets[1].unit, NOW)) do if not sets[1].set[ns.ShortId(e.id)] then miss[#miss + 1] = e.id end end
+  assert(#miss == 1 and miss[1] == gone.id)
+end
+
+-- Id-sets: one message carries several units; an empty set asks for the whole unit
+local text = ns.EncodeIdSets({ day, "m1" }, a, NOW)
+local sets = ns.DecodeIdSets(text)
+assert(#sets == 2 and sets[1].unit == day and sets[1].hash == ns.Buckets(a, NOW)[day].hash and sets[1].set[ns.ShortId(k.id)])
+assert(sets[2].unit == "m1" and sets[2].hash == 0 and next(sets[2].set) == nil)
+local bset = ns.DecodeIdSets(ns.EncodeIdSets({ day }, b, NOW))[1].set
 local missing = {}
-for _, e in ipairs(ns.DayEvents(a, day)) do if not bset[ns.ShortId(e.id)] then missing[#missing + 1] = e.id end end
+for _, e in ipairs(ns.UnitEvents(a, day, NOW)) do if not bset[ns.ShortId(e.id)] then missing[#missing + 1] = e.id end end
 assert(#missing == 1 and missing[1] == k.id)
-assert(select(3, ns.DecodeIdSet(day .. ":0:")) and next(select(3, ns.DecodeIdSet(day .. ":0:"))) == nil) -- empty set
-assert(#ns.ShortId("K:x:1") == 6 and ns.DecodeIdSet("garbage") == nil)
+assert(#ns.ShortId("K:x:1") == 6 and ns.DecodeIdSets("garbage") == nil and ns.DecodeIdSets("1:0:|x") == nil)
 
 -- Two-part names (WoW: Forever): every API shape normalizes to "First Second"
 assert(ns.Name("Todor", "Zhivkoff") == "Todor Zhivkoff")

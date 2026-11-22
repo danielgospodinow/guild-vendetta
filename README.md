@@ -208,36 +208,32 @@ Clicking `[X]` appends a `REMOVE` event and broadcasts it, the same way as a kil
 - If the removed enemy **kills a guildmate again**, they come back. A removal only clears kills up to the moment of removal, and **their score starts over** at `1-0`. The revengers leaderboard keeps its counts.
 - `REMOVE` events are kept forever, so an old copy of the list can't bring a removed enemy back.
 
-### Catching up at login: sync only from online players
+### Catching up: one check for login, reload and every few minutes
 
-On login or `/reload`, your addon and the guildmates **who are online right now** reconcile their logs. Each side ends up with what the other had, and only the missing events are sent:
+Every addon regularly checks whether its log matches the guild's. It does this **8 seconds after login or `/reload`, then every 4–6 minutes**, by broadcasting a **heartbeat**: one hash of its whole log. A guildmate whose hash matches stays silent, which is what happens almost every time. When hashes differ, the logs are reconciled with whoever is online right now, and only the missing events are sent:
 
-1. You broadcast a **digest**: per day, "N events, hash X".
-2. Guildmates compare it day by day:
-   - **A day you don't have at all:** they send you its events directly.
-   - **A day you both have, but different:** they send that day's **id-set**, short fingerprints of every event id. You reply with yours, and each side sends exactly the events the other lacks.
-3. Guildmates with identical logs would give identical answers, so they **take turns**. For each request, every addon puts the guildies it has heard from in the same order. The first answers after half a second, and the rest wait 2 seconds per place. Normally only the first one sends anything, however many guildmates are online. If the first is AFK, the next one covers it 2 seconds later.
+1. **Heartbeat:** "my log hashes to X".
+2. **Digest:** a guildmate whose hash differs answers with a summary of its log, unit by unit: "N events, hash X". A unit is one of the last 15 days, or a 30-day block for anything older. Old blocks only hold vendettas, so the summary stays about two messages long however old the guild is.
+3. **Id-sets:** the out-of-date side compares unit by unit. For every unit it lacks or disagrees on, it lists a short fingerprint of each event it holds there (an empty list means "send me all of it"), all in one message.
+4. **Events:** the other side sends exactly the events whose fingerprints are missing. If the list shows events *it* lacks, it answers with its own id-sets, and the first side sends those.
+
+Guildmates with identical logs would give identical answers, so they **take turns**. For each request, every addon puts the guildmates it has heard from in the same order. The first answers after half a second, and each later place waits 2 seconds more. Normally only the first one sends anything, however many guildmates are online. If the first is AFK, the next one covers it 2 seconds later. All messages are broadcasts: the others stay quiet because they see the answer go by.
 
 ```mermaid
 sequenceDiagram
     participant Y as You (just logged in)
     participant P as Online guildmates
-    Y-->>P: digest: per day, count + hash
-    P-->>Y: whole days you lack (events)
-    P-->>Y: id-sets for days that differ
-    Y-->>P: your id-sets, where they lack something
-    P-->>Y: exactly the missing events
-    Y-->>P: exactly the events they lack
-    Note over Y,P: everyone online ends up with the union
+    Y-->>P: heartbeat: hash of my log
+    Note over P: hashes differ. The first in turn order answers
+    P-->>Y: digest: per unit, count + hash
+    Y-->>P: id-sets for the units I lack or disagree on
+    P-->>Y: exactly the events I'm missing
+    Note over Y,P: if I hold events they lack, they send their id-sets and I send those
 ```
 
-The catch: **a sync can only come from guildmates who are online.** If a kill happened while you were offline and everyone who has it is offline too, you get it the next time you're online together with any one of them. The more of the guild runs the addon, the faster everything spreads.
+The catch: **a sync can only come from guildmates who are online.** If a kill happened while you were offline and everyone who has it is offline too, you get it the next time you're online together with any one of them. The heartbeat also heals live messages missed while online, for example during a loading screen, within a few minutes. The more of the guild runs the addon, the faster everything spreads.
 
-### Heartbeat: healing lost messages
-
-A live message can be lost, for example if you were on a loading screen when it went out. So every 4–6 minutes each addon broadcasts a **heartbeat**: one hash of its whole log. A guildmate whose hash matches stays silent. A guildmate whose hash differs answers with their digest, and the same reconciliation as a login fills the gap within minutes.
-
-**Want to see the actual messages?** [docs/sync-examples.md](docs/sync-examples.md) walks through live kills, vendettas, removals, login catch-up, heartbeats, a brand-new guildie and multi-part messages, with real captured traffic decoded field by field.
+**Want to see the actual messages?** [docs/sync-examples.md](docs/sync-examples.md) walks through live kills, vendettas, removals, a brand-new and a returning player logging in while four guildmates are online, `/reload`, heartbeats and multi-part messages, with real captured traffic decoded field by field.
 
 ### Proximity alerts
 
@@ -256,6 +252,118 @@ flowchart LR
     C -- yes --> X
     C -- no --> F["Red screen flash + raid-warning message + sound"]
 ```
+
+## Sync protocol reference
+
+The exact rules, for anyone changing or reviewing the sync code (`addon/GuildVendetta/Sync.lua` and the digest functions in `Core.lua`). [docs/sync-examples.md](docs/sync-examples.md) shows each rule in real captured traffic.
+
+### Starting point: the simple protocol, and what this one optimizes
+
+The simplest correct design is this: everyone sends heartbeats, and any player who sees a log hash different from their own **sends all of their events**. Everyone keeps whatever is new to them. That guarantees a synchronized log in a single step, because after one round every online player holds the union of everyone's events.
+
+This protocol keeps that guarantee and the same starting point (a heartbeat with one log hash), and adds two optimizations to cut traffic:
+
+| Simple protocol | This protocol | Effect |
+|---|---|---|
+| Every player whose hash differs answers | **Turn order:** players with the same answer are sorted the same way, and only the first sends it. The rest see it on the channel and stay quiet | One answer per version of the log, however many guildmates are online |
+| Each answer is the whole log | **Precise sending:** compare per-unit summaries, then fingerprints inside the units that differ, then send only the missing events | Traffic matches what's missing, not the size of the log |
+
+With a 300-event log, a player who missed 2 events costs the simple protocol hundreds of event messages: the whole log from the in-sync side, and the drifting player's own log back. This protocol needs 5 messages. When everyone is in sync, both cost a single heartbeat.
+
+### Message framing
+
+Every message is a hidden addon message: prefix `GVND`, channel `GUILD`, at most 255 bytes. It starts with a 5-character header, then the payload:
+
+| Position | Meaning |
+|---|---|
+| 1 | Kind: `E`, `B`, `H` or `I` |
+| 2–3 | Message number, base36, per sender (so the parts of one message can be matched) |
+| 4 | This part, base36 (`1`…`z`) |
+| 5 | Total parts, base36 |
+| 6… | Up to 245 characters of payload |
+
+A payload too long for one message is split into parts and reassembled by sender and message number. Incomplete messages are dropped after 60 seconds. A message needing more than 35 parts is never sent.
+
+### Message kinds
+
+| Kind | Payload | Example |
+|---|---|---|
+| `E` event | one event, see below | `K~1795289030~Todor Zhivkoff~32~PALADIN~…` |
+| `B` heartbeat | the log hash, in decimal | `2163612622` |
+| `H` digest | `unit:count:hash` for every unit, oldest first, joined by `;` | `m690:1:585697855;20777:1:2408568836;20778:3:2395705750` |
+| `I` id-sets | `unit:hash:fp,fp,…` for each listed unit, joined by <code>&#124;</code>. Hash `0` and no fingerprints means "I have nothing here, send all of it" | <code>20778:1900282881:1hj0ek,lmywsf&#124;20777:0:</code> |
+
+### Events on the wire
+
+Fields are separated by `~`. Text fields have `~ ^ , |` and newlines stripped before sending.
+
+| Event | Fields | Derived ID (never sent) |
+|---|---|---|
+| `KILL` | `K~time~victim~victimLevel~victimClass~zone~subzone~mapID~x~y~enemies`. Enemies are joined by `^`, each `name,class,race,level,killingBlow(1/0),characterID` | `K:<victim>:<time>` |
+| `REMOVE` | `R~time~enemyKey~removedBy` | `R:<enemyKey>:<time>` |
+| `VENDETTA` | `V~time~enemyKey~enemyName~enemyClass~creditedGuildie~zone` | `V:<enemyKey>:<creditedGuildie>:<time>` |
+
+`time` is server time in seconds. `enemyKey` is the enemy's character ID (GUID), or their name when the ID is unknown.
+
+### Units, hashes and fingerprints
+
+- **Hash:** `h = 5381`, then for each byte `h = (h × 33 + byte) mod 2^32` (djb2).
+- **Unit:** an event from today or the 15 days before it (by server time) belongs to its day, written as days since 1970 (`20778`). Older events belong to a 30-day block, `m` + `floor(day / 30)` (`m690`).
+- **Unit hash:** the hash of the unit's event IDs, sorted and joined by `;`.
+- **Digest:** every unit as `unit:count:unitHash`, oldest first, joined by `;`.
+- **Log hash** (sent in heartbeats): the hash of the digest.
+- **Fingerprint:** `hash(eventID) mod 36^6`, written as 6 base36 characters (`lmywsf`).
+
+### What a receiver does
+
+Messages from your own character, or on any channel other than `GUILD`, are ignored. Everything else is handled like this:
+
+| Arrives | The receiver… |
+|---|---|
+| `E` | adds the event if its ID is new, and notes that this event was just seen on the channel |
+| `B` | does nothing if the hash equals its own log hash. Otherwise, at its turn, sends its digest (`H`), unless an identical digest went out since the heartbeat arrived |
+| `H` | compares unit by unit. Units only it has: it sends their events. Units it lacks or disagrees on: it lists its fingerprints for all of them in one `I` (empty for units it lacks). Both happen at its turn |
+| `I` | for each listed unit, sends its events whose fingerprints are missing from the list. If the list has fingerprints it doesn't have, it answers with its own `I` for those units. Both happen at its turn |
+
+Login and `/reload` send a heartbeat after 8 seconds. After that, each addon sends one every 4–6 minutes (random within that range), and skips it while it still has messages to send. `/gv sync` sends the digest directly.
+
+### Taking turns
+
+Every answer (`H`, `I`, and events sent in reply) waits for the sender's turn:
+
+1. The addon lists every guildmate it has heard on the channel in the last 10 minutes, plus itself, minus the requester.
+2. It scores each name as `hash(name .. "|" .. requester .. "|" .. request)`. The request is the message kind plus the hash of its payload, for example `B2088435702`. Every addon computes the same scores, so they agree on the order without talking.
+3. Sorted by score, place 0 answers after 0.5 s, and place *n* after 0.5 + 2*n* s, plus 0–0.3 s of jitter.
+4. An addon online for less than 6 minutes adds 4 s, because it may not have heard everyone yet.
+5. When its turn comes, the addon skips any answer that is already on the channel:
+   - a digest or id-set message identical to the one it would send, seen since the request arrived;
+   - any event seen since the request arrived, checked event by event just before sending.
+
+Each addon sends at most one message part every 0.4 s, and live events jump the queue.
+
+### Validation and trust
+
+- Received events are checked before use: payload length (≤ 4000 characters), a plausible time, the exact number of fields, and 1–40 enemies per kill. Anything malformed is dropped.
+- IDs are computed by the receiver, never taken from the sender, so content and ID always match.
+- Any guild member can add and remove entries. The protocol trusts guildmates and accepts nothing from outside the guild channel.
+
+### Guarantees
+
+- **Convergence:** whenever two players are online together, a heartbeat (at most 4–6 minutes later) detects any difference and the exchange closes it. Every log converges to the union of all events anyone has seen. Order of arrival never matters.
+- **Cost:** in sync, one heartbeat. Out of sync, a digest, one or two id-set messages, and exactly the missing events. The cost doesn't grow with the number of guildmates online.
+- **Loss:** an event is lost only if its client crashes in the moment between recording it and the broadcast reaching anyone. An event held only by offline players waits until one of them is online with someone else.
+
+### Designs considered and not used
+
+| Alternative | Why not |
+|---|---|
+| "Send me everything after time T" | Loses events: a kill recorded while you were syncing with someone else is older than your watermark and is never requested |
+| Whispers (`WHISPER` channel) between two players | The others stay quiet because they *see* the answer. Whispered answers are invisible, so everyone would answer, and bystanders who lack the same events wouldn't get them |
+| Random 1–5 s waits instead of turns | Two waits ending within ~0.5 s both send everything in lockstep. Measured: avg 63 and worst 140 messages to deliver 20 events with 20 online, against exactly 20 with turns |
+| Full dump: on a mismatch, send the whole log | Every small drift costs the whole log (hundreds of events, minutes of channel time), sent once by the in-sync side and again by the drifting player |
+| Send whole differing units, no id-sets | Simpler (no `I`), but re-sends whole days, or a whole month of vendettas when an old block differs |
+| Send the digest at login instead of a heartbeat (sync v2) | Costs the whole digest on every `/reload`, even when nothing changed |
+| One digest entry per day forever | Vendettas never expire, so the digest would grow by a day for every day with a vendetta; 30-day blocks keep it at ~2 parts |
 
 ## Known limitations
 

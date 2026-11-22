@@ -2,7 +2,7 @@
 
 Every message below is **real output**: captured by running the addon's code as several simulated guildmates (the same harness as `tests/smoke_test.lua`). Nothing is hand-written except the commentary.
 
-The cast: **Todor Zhivkoff**, **Jaina Proudmoore**, **Thrall Durotan** (guildies), later **Rexxar Misha** (new guildie). Enemies: **Yasashii Hinghtclaw** and **Muffe Kung**.
+The cast: **Todor Zhivkoff**, **Jaina Proudmoore**, **Thrall Durotan**, **Sylvanas Windrunner** (guildies), plus **Rexxar Misha** and **Garrosh Hellscream** logging in. Enemies: **Yasashii Hinghtclaw**, **Muffe Kung** and **Gankston Doe**.
 
 ## Anatomy of a message
 
@@ -20,11 +20,13 @@ E 02 1 1 K~1795289030~Todor Zhivkoff~...
 | Kind | Name | Payload | When |
 |---|---|---|---|
 | `E` | event | one `KILL` / `REMOVE` / `VENDETTA`, fields split by `~` | live, and to fill gaps |
-| `H` | digest | per day: `day:count:hash`, separated by `;` | at login / `/reload`, and in answer to a mismatched heartbeat |
-| `I` | day id-set | `day:hash:` + 6-character fingerprints of that day's event ids | for a day two guildies disagree on |
-| `B` | heartbeat | one hash of the whole digest | every 4–6 minutes per guildie |
+| `B` | heartbeat | one hash of the whole digest | 8 s after login or `/reload`, then every 4–6 minutes |
+| `H` | digest | per unit: `unit:count:hash`, separated by `;` | in answer to a heartbeat whose hash differs |
+| `I` | id-sets | per unit: `unit:hash:` + 6-character fingerprints of its events, units separated by `|` | for the units two guildies disagree on, all in one message |
 
-`day` is days since 1970 (`20778` = 21 Nov 2026). Event ids are never sent. Each side derives them from the content, for example `K:Todor Zhivkoff:1795289030`.
+**Units.** The digest groups events into units. Each of the last 15 days is its own unit, written as days since 1970 (`20778` = 21 Nov 2026). Anything older is grouped into 30-day blocks, written `m` + block number (`m690` = 4 Sep to 3 Oct 2026). Kills and removals expire after 14 days, so old blocks only hold vendettas, which are kept forever for the leaderboard. A year-old guild's digest is about 28 units, two message parts.
+
+Event ids are never sent. Each side derives them from the content, for example `K:Todor Zhivkoff:1795289030`.
 
 ## 1. Live: Todor dies to two enemies
 
@@ -66,39 +68,65 @@ Thrall Durotan    [event]  E0211R~1795289699~Player-6948-05F3FBB6~Thrall Durotan
 
 `R` = REMOVE: "hide this enemy's kills up to `1795289699`", removed by Thrall. Muffe disappears from every online list. Everyone holds **3 events**.
 
-## 4. Catch-up at login: Thrall was offline for one kill
+## 4. Logging in: four guildies in sync, one player arrives
 
-While Thrall is offline, Todor dies again. Todor and Jaina get it live, so they hold **4 events** and Thrall still holds 3. Then Thrall logs in:
+Login and `/reload` use the same check as the periodic heartbeat: 8 seconds after logging in, the addon broadcasts one hash of its log. The four guildies online (Todor, Jaina, Thrall, Sylvanas) hold the same 5 events:
 
-```mermaid
-sequenceDiagram
-    participant Th as Thrall (3 events)
-    participant To as Todor (4)
-    participant Ja as Jaina (4)
-    Th->>To: H  "day 20778: 3 events, hash 2395705750"
-    Th->>Ja: (same broadcast)
-    Note over To,Ja: day 20778 differs (4 vs 3). Both would answer<br/>identically, so they take turns: for this request<br/>the order is Jaina, then Todor. Jaina answers at 0.5 s;<br/>Todor's turn (2.5 s) comes after her answer arrived.
-    Ja->>Th: I  "day 20778: my 4 fingerprints"
-    Note over Th: I'm missing lnjrx8.<br/>Answer with my own list so they can tell.
-    Th->>Ja: I  "day 20778: my 3 fingerprints"
-    Ja->>Th: E  the missing KILL
-```
+| Event | Unit | Fingerprint |
+|---|---|---|
+| KILL of Todor (today) | `20778` | `lmywsf` |
+| VENDETTA by Jaina on Yasashii (today) | `20778` | `gi3g5b` |
+| REMOVE of Muffe by Thrall (today) | `20778` | `1hj0ek` |
+| KILL of Sylvanas (yesterday) | `20777` | `3tzzlw` |
+| VENDETTA by Thrall on Gankston (60 days ago) | `m690` | `9opjcv` |
+
+Their digest is `m690:1:585697855;20777:1:2408568836;20778:3:2395705750`, which hashes to `2163612622`. Times below are seconds after the newcomer's heartbeat.
+
+### 4a. A brand-new player (empty log)
 
 ```
-Thrall Durotan    [digest]      H031120778:3:2395705750
-Jaina Proudmoore  [day id-set]  I041120778:1544699368:lnjrx8,1hj0ek,gi3g5b,lmywsf
-Thrall Durotan    [day id-set]  I041120778:2395705750:1hj0ek,gi3g5b,lmywsf
-Jaina Proudmoore  [event]       E0511K~1795293302~Todor Zhivkoff~32~PALADIN~Alterac Mountains~The Headland~1416~0.399~0.920~Yasashii Hinghtclaw,DRUID,NightElf,37,1,Player-6842-00C4852A
+t=0.0  Rexxar Misha         B 5381
+t=0.8  Sylvanas Windrunner  H m690:1:585697855;20777:1:2408568836;20778:3:2395705750
+t=5.7  Rexxar Misha         I 20778:0:|20777:0:|m690:0:
+t=6.4  Jaina Proudmoore     E R~1795289699~Player-6948-05F3FBB6~Thrall Durotan
+t=6.5  Jaina Proudmoore     E V~1795289633~Player-6842-00C4852A~Yasashii Hinghtclaw~...
+t=6.6  Jaina Proudmoore     E K~1795289030~Todor Zhivkoff~...
+t=6.7  Jaina Proudmoore     E K~1795202630~Sylvanas Windrunner~...
+t=6.8  Jaina Proudmoore     E V~1790105030~Player-6948-0ABCDEF1~Gankston Doe~...
 ```
 
-Step by step:
+1. **Heartbeat.** Rexxar's log is empty, so his hash is `5381`, the hash of an empty digest.
+2. **Digest.** All four guildies see that `5381` isn't their `2163612622`, and all four would answer with the same digest. They take turns, and for this request Sylvanas is first, so she sends it. The other three see her digest go by and stay quiet.
+3. **Id-sets.** Rexxar compares the digest with his own (empty) one. He has nothing in any of the three units, so he sends one message with an empty id-set for each: "send me all of these". He just logged in, so he waits 4 s longer than usual before sending (see "Who answers").
+4. **Events.** The four guildies all see what Rexxar lacks. This time Jaina is first in line, so she sends the five events. The others watch them go by and skip their copies.
 
-1. **`H…20778:3:2395705750`:** Thrall's digest: "on day 20778 I have 3 events, hash 2395705750".
-2. **Todor and Jaina compare** with their own day 20778 (4 events, a different hash). The day differs, but the digest can't say *which* events, so the day's fingerprints are needed: `lnjrx8,1hj0ek,gi3g5b,lmywsf`. Both have the same answer, and the turn order for this request puts Jaina first, so she sends it.
-3. **Thrall compares** those 4 fingerprints with his own 3. He is missing `lnjrx8`. He doesn't know which event that is, so he answers with his own list.
-4. **Jaina sees** that Thrall's list lacks `lnjrx8` (Todor's newest KILL) and sends exactly that one event.
+**8 messages, and each event crosses the channel once.**
 
-**Four messages, and each event is sent once.** Todor stayed silent the whole time. Each of his turns came 2 s after Jaina's, and by then her answer was already on the channel.
+### 4b. A returning player (missing 2 events)
+
+Garrosh was offline yesterday and part of today. He holds 3 of the 5 events.
+
+```
+t=0.0  Garrosh Hellscream   B 28244048
+t=0.7  Jaina Proudmoore     H m690:1:585697855;20777:1:2408568836;20778:3:2395705750
+t=5.5  Garrosh Hellscream   I 20778:1900282881:1hj0ek,lmywsf|20777:0:
+t=6.2  Todor Zhivkoff       E V~1795289633~Player-6842-00C4852A~Yasashii Hinghtclaw~...
+t=6.3  Todor Zhivkoff       E K~1795202630~Sylvanas Windrunner~...
+```
+
+1. Garrosh's hash differs from theirs, so one guildie (Jaina) answers with the digest.
+2. Garrosh compares unit by unit. Unit `m690` matches, so he skips it. For `20778` both sides have events but the hashes differ, so he lists his fingerprints. He has nothing for `20777`, so he sends an empty id-set for it. Both go in one message.
+3. The guildies compare. In `20778` Garrosh lacks `gi3g5b` (Jaina's vendetta), and `20777` is empty, so he lacks `3tzzlw` too. The first in line (Todor) sends exactly those two events.
+
+**5 messages, and only the 2 missing events are sent.**
+
+### 4c. `/reload` while up to date
+
+```
+t=0.0  Todor Zhivkoff       B 2163612622
+```
+
+Everyone computes the same hash, so nobody answers. **One message.** This is what almost every login, reload and periodic heartbeat looks like.
 
 ## 5. Heartbeat: everyone in sync
 
@@ -115,32 +143,18 @@ Jaina missed Thrall's removal (say she was on a loading screen when it went out)
 ```
 Todor Zhivkoff    [heartbeat]   B05111001900908
 Jaina Proudmoore  [digest]      H071120778:3:3155731750
-Thrall Durotan    [day id-set]  I051120778:1544699368:lnjrx8,1hj0ek,gi3g5b,lmywsf
-Jaina Proudmoore  [day id-set]  I081120778:3155731750:lnjrx8,gi3g5b,lmywsf
+Thrall Durotan    [id-sets]     I051120778:1544699368:lnjrx8,1hj0ek,gi3g5b,lmywsf
+Jaina Proudmoore  [id-sets]     I081120778:3155731750:lnjrx8,gi3g5b,lmywsf
 Thrall Durotan    [event]       E0611R~1795289699~Player-6948-05F3FBB6~Thrall Durotan
 ```
 
 1. Todor's heartbeat hash (`1001900908`) doesn't match Jaina's, so Jaina answers with her digest. Thrall's log matches Todor's, so he doesn't answer.
-2. From there it's the same exchange as a login: the day 20778 id-sets show Jaina lacks `1hj0ek`, the REMOVE.
+2. From there it's the same exchange as a login: the id-sets for unit 20778 show Jaina lacks `1hj0ek`, the REMOVE.
 3. For this request, the turn order puts Thrall before Todor, so Thrall sends the id-set and then the REMOVE. Todor stays quiet.
 
 Without heartbeats, Jaina would stay out of date until her next login or `/reload`.
 
-## 7. A brand-new guildie logs in
-
-Rexxar just installed the addon and has an empty log. His digest is empty:
-
-```
-Rexxar Misha      [digest]  H0111
-Thrall Durotan    [event]   E0711K~1795293302~Todor Zhivkoff~...      (newest first)
-Thrall Durotan    [event]   E0811R~1795289699~Player-6948-05F3FBB6~Thrall Durotan
-Thrall Durotan    [event]   E0911V~1795289633~Player-6842-00C4852A~Yasashii Hinghtclaw~...
-Thrall Durotan    [event]   E0a11K~1795289030~Todor Zhivkoff~...
-```
-
-When the other side has **no events at all** for a day, there's nothing to compare, so the events are sent straight away with no id-sets. Only Thrall sends, because his turn is first. Todor and Jaina skip each event as they see Thrall's copy go by. Rexxar now holds all **4 events**.
-
-## 8. A message too big for one packet
+## 7. A message too big for one packet
 
 WoW caps an addon message at 255 bytes, so a KILL with 12 attackers is split into 4 parts:
 
