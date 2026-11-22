@@ -257,6 +257,19 @@ flowchart LR
 
 The exact rules, for anyone changing or reviewing the sync code (`addon/GuildVendetta/Sync.lua` and the digest functions in `Core.lua`). [docs/sync-examples.md](docs/sync-examples.md) shows each rule in real captured traffic.
 
+### Starting point: the simple protocol, and what this one optimizes
+
+The simplest correct design is this: everyone sends heartbeats, and any player who sees a log hash different from their own **sends all of their events**. Everyone keeps whatever is new to them. That guarantees a synchronized log in a single step, because after one round every online player holds the union of everyone's events.
+
+This protocol keeps that guarantee and the same starting point (a heartbeat with one log hash), and adds two optimizations to cut traffic:
+
+| Simple protocol | This protocol | Effect |
+|---|---|---|
+| Every player whose hash differs answers | **Turn order:** players with the same answer are sorted the same way, and only the first sends it. The rest see it on the channel and stay quiet | One answer per version of the log, however many guildmates are online |
+| Each answer is the whole log | **Precise sending:** compare per-unit summaries, then fingerprints inside the units that differ, then send only the missing events | Traffic matches what's missing, not the size of the log |
+
+With a 300-event log, a player who missed 2 events costs the simple protocol hundreds of event messages: the whole log from the in-sync side, and the drifting player's own log back. This protocol needs 5 messages. When everyone is in sync, both cost a single heartbeat.
+
 ### Message framing
 
 Every message is a hidden addon message: prefix `GVND`, channel `GUILD`, at most 255 bytes. It starts with a 5-character header, then the payload:
