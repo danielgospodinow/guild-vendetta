@@ -41,4 +41,4 @@ jobs:
           V: ${{ steps.version.outputs.version }}
         run: |
           gh release create "v$V" "dist/GuildVendetta-$V.zip" \
-            --title "Guild Vendetta $V" --target "$GITHUB_SHA" --generate-notes
+            --title "$V" --target "$GITHUB_SHA" --generate-notes
